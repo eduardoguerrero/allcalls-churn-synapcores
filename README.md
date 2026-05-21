@@ -52,6 +52,21 @@ POST /api/members/{id}/offer         → log a retention offer for a member
 
 ---
 
+## Running tests
+
+```bash
+php artisan test
+```
+
+The suite uses SQLite in-memory (no external dependencies required):
+
+| Suite | File | Tests | What it covers |
+|---|---|---|---|
+| Unit | `tests/Unit/SynapCoresSeedTest.php` | 10 | `computeChurn` probability zones, `weightedRandom` distribution |
+| Feature | `tests/Feature/Commands/SynapCoresSeedCommandTest.php` | 13 | Command validation, DB state, truncation, field ranges |
+
+---
+
 ## Design decisions
 
 - **Custom SDK over a library** — SynapCores doesn't ship a PHP SDK, so `app/Services/SynapCores/` wraps Laravel's built-in HTTP client. `SynapCoresAuth` caches the JWT for 55 minutes (keyed by a hash of the API key for cache isolation) and auto-refreshes on 401; `SynapCoresClient` retries once after a token refresh before throwing. This makes the SDK resilient without being complex.
@@ -74,7 +89,7 @@ POST /api/members/{id}/offer         → log a retention offer for a member
 - **Personalised offers** — Use SynapCores' `SELECT GENERATE(…)` to draft a 2-sentence retention message per member based on their tenure and recent spend.
 - **Model versioning** — Track experiment versions and allow rollback via an admin UI.
 - **Authentication** — Add Laravel Breeze to protect `/dashboard` behind a login screen.
-- **Tests** — Add a PHPUnit feature test that seeds a small dataset, mocks the SynapCores HTTP responses, and asserts the dashboard returns the expected members.
+- **Tests** — Extend the existing PHPUnit suite to cover the SynapCores SDK (mock HTTP responses with Mockery) and the dashboard endpoint assertions.
 
 ---
 
@@ -83,7 +98,7 @@ POST /api/members/{id}/offer         → log a retention offer for a member
 | Corner cut | Why | What I'd do instead |
 |---|---|---|
 | No auth on dashboard/API | Out of scope per spec; adds setup friction | Laravel Breeze + sanctum tokens |
-| No test suite | Time constraint; SDK is testable in isolation | Mock `SynapCoresClient` with Mockery |
+| Partial test suite | Unit + feature tests cover `synapcores:seed` (23 tests, 932 assertions); SDK and dashboard endpoints are not yet covered | Mock `SynapCoresClient` with Mockery for SDK tests |
 | `IF NOT EXISTS` on `CREATE EXPERIMENT` | Simplifies re-running `synapcores:train` | Detect experiment status via SynapCores API before creating |
 | Tailwind CDN | Removes the `npm install` step entirely | Vite + Tailwind CLI for production |
 | SQLite in local `.env` | Simplest possible setup for evaluators | MySQL with a `docker-compose.yml` |

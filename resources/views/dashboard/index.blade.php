@@ -33,21 +33,22 @@
             <div class="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center mb-4">
                 <svg class="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round"
-                          d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z"/>
+                          d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/>
                 </svg>
             </div>
-            <h2 class="text-base font-semibold text-gray-800">No predictions available</h2>
-            <p class="text-sm text-gray-500 mt-1 max-w-xs">
+            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 ring-1 ring-blue-200 mb-3">
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd"/>
+                </svg>
+                No predictions available
+            </span>
+            <p class="text-sm text-gray-500 max-w-xs">
                 Seed the database and train the model to see at-risk members here.
             </p>
         </div>
 
     @else
         {{-- Summary cards --}}
-        @php
-            $avg = $members->avg('churn_probability');
-            $high = $members->where('churn_probability', '>=', 0.7)->count();
-        @endphp
         <div class="grid grid-cols-3 gap-4 mb-6">
             <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
                 <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Members shown</p>
@@ -56,7 +57,7 @@
             </div>
             <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
                 <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Avg. churn probability</p>
-                <p class="text-2xl font-bold text-gray-900 mt-1">{{ number_format($avg * 100, 1) }}%</p>
+                <p class="text-2xl font-bold text-gray-900 mt-1">{{ $avg }}%</p>
                 <p class="text-xs text-gray-400 mt-0.5">Across displayed members</p>
             </div>
             <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
@@ -87,25 +88,25 @@
                 <tbody class="divide-y divide-gray-50">
                     @foreach ($members as $member)
                         @php
-                            $p = $member->churn_probability ?? 0;
+                            $p = $member->churnProbability;
                             $barColor  = $p >= 0.7 ? 'bg-red-500' : ($p >= 0.4 ? 'bg-amber-400' : 'bg-emerald-400');
                             $textColor = $p >= 0.7 ? 'text-red-600' : ($p >= 0.4 ? 'text-amber-600' : 'text-emerald-600');
                             $badgeColor = match($member->tier) {
-                                \App\Enums\Tier::Platinum => 'bg-purple-50 text-purple-700 ring-1 ring-purple-200',
-                                \App\Enums\Tier::Gold     => 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
-                                default                   => 'bg-gray-100 text-gray-600',
+                                'Platinum' => 'bg-purple-50 text-purple-700 ring-1 ring-purple-200',
+                                'Gold'     => 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+                                default    => 'bg-gray-100 text-gray-600',
                             };
                         @endphp
                         <tr class="hover:bg-gray-50 transition-colors" id="row-{{ $member->id }}">
                             <td class="px-5 py-3.5 text-gray-400 font-mono text-xs">#{{ $member->id }}</td>
                             <td class="px-5 py-3.5">
                                 <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold {{ $badgeColor }}">
-                                    {{ $member->tier->value }}
+                                    {{ $member->tier }}
                                 </span>
                             </td>
-                            <td class="px-5 py-3.5 text-gray-700">{{ $member->tenure_months }} mo.</td>
-                            <td class="px-5 py-3.5 text-gray-700">{{ $member->visits_30d }}</td>
-                            <td class="px-5 py-3.5 text-gray-700">${{ number_format($member->spend_30d, 2) }}</td>
+                            <td class="px-5 py-3.5 text-gray-700">{{ $member->tenureMonths }} mo.</td>
+                            <td class="px-5 py-3.5 text-gray-700">{{ $member->visits30d }}</td>
+                            <td class="px-5 py-3.5 text-gray-700">${{ number_format($member->spend30d, 2) }}</td>
                             <td class="px-5 py-3.5">
                                 <div class="flex items-center gap-2.5">
                                     <div class="w-24 bg-gray-100 rounded-full h-1.5">

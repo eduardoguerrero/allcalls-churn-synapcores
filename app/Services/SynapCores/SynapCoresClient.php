@@ -62,7 +62,7 @@ class SynapCoresClient
                 'body'   => $body,
             ]);
             throw new SynapCoresException(
-                "SynapCores error [{$response->status()}]: {$body}",
+                "SynapCores error {$response->status()}",
                 $response->status(),
             );
         }
@@ -79,11 +79,12 @@ class SynapCoresClient
                 ->post("{$this->baseUrl}{$path}", $payload);
         } catch (ConnectionException $e) {
             Log::error('SynapCoresClient | connection failed', [
+                'base URL' => $this->baseUrl,
                 'path'  => $path,
                 'error' => $e->getMessage(),
             ]);
             throw new SynapCoresException(
-                "Cannot connect to SynapCores at {$this->baseUrl}: {$e->getMessage()}",
+                "Cannot connect to SynapCores",
             );
         }
     }
