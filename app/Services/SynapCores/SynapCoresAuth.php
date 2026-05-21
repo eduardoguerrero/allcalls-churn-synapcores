@@ -11,22 +11,25 @@ use Illuminate\Support\Facades\Http;
 
 class SynapCoresAuth
 {
-    private const CACHE_KEY = 'synapcores_jwt';
-
     public function __construct(
         private readonly string $baseUrl,
         private readonly string $apiKey,
         private readonly int $timeout,
     ) {}
 
+    private function cacheKey(): string
+    {
+        return 'synapcores_jwt_' . md5($this->apiKey);
+    }
+
     public function getToken(): string
     {
-        return Cache::remember(self::CACHE_KEY, $this->tokenTtl(), fn () => $this->fetchToken());
+        return Cache::remember($this->cacheKey(), $this->tokenTtl(), fn () => $this->fetchToken());
     }
 
     public function refreshToken(): string
     {
-        Cache::forget(self::CACHE_KEY);
+        Cache::forget($this->cacheKey());
 
         return $this->getToken();
     }

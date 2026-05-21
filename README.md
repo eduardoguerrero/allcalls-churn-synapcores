@@ -54,9 +54,11 @@ POST /api/members/{id}/offer         → log a retention offer for a member
 
 ## Design decisions
 
-- **Custom SDK over a library** — SynapCores doesn't ship a PHP SDK, so `app/Services/SynapCores/` wraps Laravel's built-in HTTP client. `SynapCoresAuth` caches the JWT for 55 minutes and auto-refreshes on 401; `SynapCoresClient` retries once after a token refresh before throwing. This makes the SDK resilient without being complex.
+- **Custom SDK over a library** — SynapCores doesn't ship a PHP SDK, so `app/Services/SynapCores/` wraps Laravel's built-in HTTP client. `SynapCoresAuth` caches the JWT for 55 minutes (keyed by a hash of the API key for cache isolation) and auto-refreshes on 401; `SynapCoresClient` retries once after a token refresh before throwing. This makes the SDK resilient without being complex.
 
-- **Singleton registration** — Both `SynapCoresAuth` and `SynapCoresClient` are registered as singletons in `AppServiceProvider` so the cached JWT token is shared across the request lifecycle and across Artisan command steps.
+- **Singleton registration + Repository pattern** — Both `SynapCoresAuth` and `SynapCoresClient` are singletons in `AppServiceProvider` so the cached JWT is shared across the request lifecycle. Data access is abstracted behind `LoyaltyMemberRepositoryInterface` / `EloquentLoyaltyMemberRepository`, allowing the data source to be swapped without touching controllers.
+
+- **API rate limiting + FormRequest** — API routes are protected with `throttle:60,1` (60 req/min). `sendOffer` uses a `SendOfferRequest` FormRequest, keeping validation concerns out of the controller. The API response is shaped by `LoyaltyMemberResource` (JsonResource), exposing only the fields needed and formatting floats consistently.
 
 - **Churn signal design** — The seed data encodes a clear but noisy signal: members with `visits_30d < 2` AND `spend_30d < $20` are labelled churned ~85% of the time; high-activity members churn only ~10% of the time. Noise (~15%) prevents a trivially overfit model.
 

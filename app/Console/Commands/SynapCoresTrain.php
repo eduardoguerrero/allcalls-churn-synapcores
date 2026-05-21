@@ -37,7 +37,7 @@ class SynapCoresTrain extends Command
             return self::FAILURE;
         }
 
-        $this->info('Training pipeline complete.');
+        $this->info('Training completed.');
         Log::info('synapcores:train finished successfully');
 
         return self::SUCCESS;
@@ -69,7 +69,7 @@ class SynapCoresTrain extends Command
 
         $this->synapcores->execute('TRAIN churn_v1');
 
-        $this->line('     Training complete.');
+        $this->line('Training completed');
         Log::info('synapcores:train step 2 — training complete');
     }
 
@@ -90,6 +90,6 @@ class SynapCoresTrain extends Command
         SQL);
 
         $this->line('Predictions written to loyalty_members.churn_probability.');
-        Log::info('synapcores:train step 3 — churn_probability updated for all members');
+        Log::info('synapcores:train step 3 | churn_probability updated for all members');
     }
 }
