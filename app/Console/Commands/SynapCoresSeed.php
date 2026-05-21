@@ -6,23 +6,27 @@ namespace App\Console\Commands;
 
 use App\Models\LoyaltyMember;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 
 class SynapCoresSeed extends Command
 {
     protected $signature   = 'synapcores:seed {--count=8000 : Number of members to generate}';
     protected $description = 'Seed loyalty_members with realistic churn-signal data';
 
+    private const array TIERS   = ['Bronze', 'Silver', 'Gold', 'Platinum'];
+    private const array WEIGHTS = [50, 30, 15, 5];
+
     public function handle(): int
     {
         $count = (int) $this->option('count');
 
         $this->info("Seeding {$count} loyalty members…");
+        Log::info('synapcores:seed started', ['count' => $count]);
 
         LoyaltyMember::truncate();
+        Log::info('synapcores:seed | loyalty_members table truncated');
 
-        $tiers   = ['Bronze', 'Silver', 'Gold', 'Platinum'];
-        $weights = [50, 30, 15, 5];
-        $now     = now();
+        $now = now();
 
         $bar = $this->output->createProgressBar($count);
         $bar->start();
@@ -35,7 +39,7 @@ class SynapCoresSeed extends Command
                 $spend   = round(random_int(0, 50000) / 100, 2);
 
                 $rows[] = [
-                    'tier'              => $this->weightedRandom($tiers, $weights),
+                    'tier'              => $this->weightedRandom(self::TIERS, self::WEIGHTS),
                     'tenure_months'     => random_int(1, 84),
                     'visits_30d'        => $visits,
                     'spend_30d'         => $spend,
@@ -59,6 +63,11 @@ class SynapCoresSeed extends Command
         $rate    = $total > 0 ? round($churned / $total * 100, 1) : 0;
 
         $this->info("Done. {$total} members seeded. Churn rate: {$rate}%");
+        Log::info('synapcores:seed finished', [
+            'total'      => $total,
+            'churned'    => $churned,
+            'churn_rate' => "{$rate}%",
+        ]);
 
         return self::SUCCESS;
     }
