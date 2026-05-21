@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\Tier;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
@@ -18,6 +19,7 @@ class LoyaltyMember extends Model
     ];
 
     protected $casts = [
+        'tier'              => Tier::class,
         'churned'           => 'boolean',
         'churn_probability' => 'float',
         'spend_30d'         => 'float',
@@ -28,7 +30,7 @@ class LoyaltyMember extends Model
     public function scopeAtRisk(Builder $query): Builder
     {
         return $query
-            ->whereIn('tier', ['Gold', 'Platinum'])
+            ->whereIn('tier', [Tier::Gold->value, Tier::Platinum->value])
             ->whereNotNull('churn_probability')
             ->orderByDesc('churn_probability');
     }

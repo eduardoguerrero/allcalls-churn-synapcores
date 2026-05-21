@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Enums\Tier;
 use App\Models\LoyaltyMember;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
@@ -13,11 +14,13 @@ class SynapCoresSeed extends Command
     protected $signature   = 'synapcores:seed {--count=8000 : Number of members to generate}';
     protected $description = 'Seed loyalty_members with realistic churn-signal data';
 
-    private const array TIERS   = ['Bronze', 'Silver', 'Gold', 'Platinum'];
+    // Tier distribution that mirrors a real loyalty program pyramid (weights are relative, not percentages)
     private const array WEIGHTS = [50, 30, 15, 5];
 
     public function handle(): int
     {
+
+        $this->info("Starting command synapcores:seed...");
         $count = (int) $this->option('count');
 
         if ($count < 1 || $count > 100_000) {
@@ -25,7 +28,7 @@ class SynapCoresSeed extends Command
             return self::FAILURE;
         }
 
-        $this->info("Seeding {$count} loyalty members…");
+        $this->info("Seeding {$count} loyalty members...");
         Log::info('synapcores:seed started', ['count' => $count]);
 
         LoyaltyMember::truncate();
@@ -44,7 +47,7 @@ class SynapCoresSeed extends Command
                 $spend   = round(random_int(0, 50000) / 100, 2);
 
                 $rows[] = [
-                    'tier'              => $this->weightedRandom(self::TIERS, self::WEIGHTS),
+                    'tier'              => $this->weightedRandom(Tier::cases(), self::WEIGHTS)->value,
                     'tenure_months'     => random_int(1, 84),
                     'visits_30d'        => $visits,
                     'spend_30d'         => $spend,
@@ -65,13 +68,11 @@ class SynapCoresSeed extends Command
 
         $total   = LoyaltyMember::count();
         $churned = LoyaltyMember::where('churned', true)->count();
-        $rate    = $total > 0 ? round($churned / $total * 100, 1) : 0;
 
-        $this->info("Done. {$total} members seeded. Churn rate: {$rate}%");
+        $this->info("Done. {$total} members seeded.");
         Log::info('synapcores:seed finished', [
             'total'      => $total,
-            'churned'    => $churned,
-            'churn_rate' => "{$rate}%",
+            'churned'    => $churned,          
         ]);
 
         return self::SUCCESS;
@@ -98,8 +99,8 @@ class SynapCoresSeed extends Command
         return $roll <= 40;
     }
 
-    /** @param string[] $items  @param int[] $weights */
-    private function weightedRandom(array $items, array $weights): string
+    /** @param Tier[] $items  @param int[] $weights */
+    private function weightedRandom(array $items, array $weights): Tier
     {
         $total      = array_sum($weights);
         $roll       = random_int(1, $total);

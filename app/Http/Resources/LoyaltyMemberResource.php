@@ -13,7 +13,7 @@ class LoyaltyMemberResource extends JsonResource
     {
         return [
             'id'               => $this->id,
-            'tier'             => $this->tier,
+            'tier'             => $this->tier->value,
             'tenure_months'    => $this->tenure_months,
             'visits_30d'       => $this->visits_30d,
             'spend_30d'        => round((float) $this->spend_30d, 2),

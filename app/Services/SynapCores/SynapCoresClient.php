@@ -7,6 +7,7 @@ namespace App\Services\SynapCores;
 use App\Services\SynapCores\Exceptions\SynapCoresException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class SynapCoresClient
@@ -24,6 +25,7 @@ class SynapCoresClient
      */
     public function query(string $sql): array
     {
+        Log::debug('SynapCoresClient | query', ['sql' => $sql]);
         $response = $this->post('/v1/query', ['sql' => $sql]);
 
         return $response['rows'] ?? $response['data'] ?? $response;
@@ -35,6 +37,7 @@ class SynapCoresClient
      */
     public function execute(string $sql): bool
     {
+        Log::debug('SynapCoresClient | execute', ['sql' => $sql]);
         $this->post('/v1/query', ['sql' => $sql]);
 
         return true;
@@ -46,12 +49,18 @@ class SynapCoresClient
 
         // On 401 the token may have expired — refresh once and retry
         if ($response->status() === Response::HTTP_UNAUTHORIZED) {
+            Log::warning('SynapCoresClient | 401 received, retrying after token refresh');
             $this->auth->refreshToken();
             $response = $this->send($path, $payload);
         }
 
         if ($response->failed()) {
             $body = $response->json('message') ?? $response->json('error') ?? $response->body();
+            Log::error('SynapCoresClient | request failed', [
+                'path'   => $path,
+                'status' => $response->status(),
+                'body'   => $body,
+            ]);
             throw new SynapCoresException(
                 "SynapCores error [{$response->status()}]: {$body}",
                 $response->status(),
@@ -69,6 +78,10 @@ class SynapCoresClient
                 ->acceptJson()
                 ->post("{$this->baseUrl}{$path}", $payload);
         } catch (ConnectionException $e) {
+            Log::error('SynapCoresClient | connection failed', [
+                'path'  => $path,
+                'error' => $e->getMessage(),
+            ]);
             throw new SynapCoresException(
                 "Cannot connect to SynapCores at {$this->baseUrl}: {$e->getMessage()}",
             );

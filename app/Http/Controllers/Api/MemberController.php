@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\SendOfferRequest;
 use App\Http\Resources\LoyaltyMemberResource;
 use App\Models\LoyaltyMember;
 use App\Repositories\LoyaltyMemberRepositoryInterface;
@@ -25,11 +24,11 @@ class MemberController extends Controller
         return LoyaltyMemberResource::collection($members);
     }
 
-    public function sendOffer(SendOfferRequest $request, LoyaltyMember $member): JsonResponse
+    public function sendOffer(LoyaltyMember $member): JsonResponse
     {
         Log::info('Retention offer triggered', [
             'member_id' => $member->id,
-            'tier'      => $member->tier,
+            'tier'      => $member->tier->value,
             'churn_p'   => $member->churn_probability,
         ]);
 
