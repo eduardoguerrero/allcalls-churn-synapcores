@@ -40,7 +40,7 @@ php artisan synapcores:train         # CREATE EXPERIMENT → TRAIN → AUTOML.PR
 
 # 6. Serve
 php artisan serve
-# Open http://localhost:8000/dashboard
+# Open http://127.0.0.1:8000/dashboard
 ```
 
 The JSON API is also available without authentication:
