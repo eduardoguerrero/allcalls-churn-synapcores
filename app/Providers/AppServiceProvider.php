@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Repositories\EloquentLoyaltyMemberRepository;
+use App\Repositories\LoyaltyMemberRepositoryInterface;
 use App\Services\SynapCores\SynapCoresAuth;
 use App\Services\SynapCores\SynapCoresClient;
 use Illuminate\Support\ServiceProvider;
@@ -10,6 +12,8 @@ class AppServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->app->bind(LoyaltyMemberRepositoryInterface::class, EloquentLoyaltyMemberRepository::class);
+
         $this->app->singleton(SynapCoresAuth::class, function () {
             return new SynapCoresAuth(
                 baseUrl: config('services.synapcores.url'),

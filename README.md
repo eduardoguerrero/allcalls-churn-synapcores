@@ -16,7 +16,7 @@ A Laravel 13 application that integrates with **SynapCores AIDB** to predict loy
 
 ```bash
 # 1. Clone & install
-git clone https://github.com/YOUR_USERNAME/allcalls-churn-synapcores.git
+git clone https://github.com/eduardoguerrero/allcalls-churn-synapcores.git
 cd allcalls-churn-synapcores
 composer install
 

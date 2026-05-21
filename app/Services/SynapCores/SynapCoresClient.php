@@ -1,10 +1,13 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Services\SynapCores;
 
 use App\Services\SynapCores\Exceptions\SynapCoresException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Symfony\Component\HttpFoundation\Response;
 
 class SynapCoresClient
 {
@@ -42,7 +45,7 @@ class SynapCoresClient
         $response = $this->send($path, $payload);
 
         // On 401 the token may have expired — refresh once and retry
-        if ($response->status() === 401) {
+        if ($response->status() === Response::HTTP_UNAUTHORIZED) {
             $this->auth->refreshToken();
             $response = $this->send($path, $payload);
         }
