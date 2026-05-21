@@ -19,17 +19,16 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(SynapCoresAuth::class, function () {
             return new SynapCoresAuth(
-                baseUrl: config('services.synapcores.url'),
-                apiKey:  config('services.synapcores.api_key'),
-                timeout: config('services.synapcores.timeout'),
+                apiKey: config('services.synapcores.api_key'),
             );
         });
 
         $this->app->singleton(SynapCoresClient::class, function ($app) {
             return new SynapCoresClient(
-                auth:    $app->make(SynapCoresAuth::class),
-                baseUrl: config('services.synapcores.url'),
-                timeout: config('services.synapcores.timeout'),
+                auth:     $app->make(SynapCoresAuth::class),
+                baseUrl:  config('services.synapcores.url'),
+                database: config('services.synapcores.database'),
+                timeout:  config('services.synapcores.timeout'),
             );
         });
     }

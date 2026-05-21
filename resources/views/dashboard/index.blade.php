@@ -16,16 +16,37 @@
             <h1 class="text-xl font-semibold text-gray-900 tracking-tight">Loyalty Churn Predictor</h1>
             <p class="text-sm text-gray-500 mt-0.5">At-risk Gold &amp; Platinum members · AllCalls.io</p>
         </div>
-        @if ($members->isNotEmpty())
-            <span class="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full">
-                <span class="w-2 h-2 rounded-full bg-green-500 inline-block"></span>
-                Model active
-            </span>
-        @endif
     </div>
 </header>
 
 <main class="max-w-7xl mx-auto px-6 py-8">
+
+    {{-- Search --}}
+    <form method="GET" action="{{ route('dashboard') }}" class="mb-6 flex gap-2">
+        <div class="relative flex-1 max-w-sm">
+            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"/>
+            </svg>
+            <input
+                type="text"
+                name="search"
+                value="{{ $search ?? '' }}"
+                placeholder="Search by tier or member ID…"
+                class="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white">
+        </div>
+        <button type="submit"
+                class="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 active:scale-95 transition-all">
+            Search
+        </button>
+        @if ($search)
+            <a href="{{ route('dashboard') }}"
+               class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all">
+                Clear
+            </a>
+        @endif
+    </form>
 
     @if ($members->isEmpty())
         {{-- Empty state --}}
@@ -40,10 +61,14 @@
                 <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd"/>
                 </svg>
-                No predictions available
+                @if ($search) No results @else No predictions available @endif
             </span>
             <p class="text-sm text-gray-500 max-w-xs">
-                Seed the database and train the model to see at-risk members here.
+                @if ($search)
+                    Try a different tier name (Gold, Platinum) or a member ID.
+                @else
+                    Seed the database and train the model to see at-risk members here.
+                @endif
             </p>
         </div>
 
@@ -52,13 +77,13 @@
         <div class="grid grid-cols-3 gap-4 mb-6">
             <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
                 <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Members shown</p>
-                <p class="text-2xl font-bold text-gray-900 mt-1">{{ $members->count() }}</p>
-                <p class="text-xs text-gray-400 mt-0.5">Top 50 · Gold &amp; Platinum only</p>
+                <p class="text-2xl font-bold text-gray-900 mt-1">{{ $paginator->total() }}</p>
+                <p class="text-xs text-gray-400 mt-0.5">Page {{ $paginator->currentPage() }} of {{ $paginator->lastPage() }} · Gold &amp; Platinum only</p>
             </div>
             <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
                 <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">Avg. churn probability</p>
                 <p class="text-2xl font-bold text-gray-900 mt-1">{{ $avg }}%</p>
-                <p class="text-xs text-gray-400 mt-0.5">Across displayed members</p>
+                <p class="text-xs text-gray-400 mt-0.5">Across current page</p>
             </div>
             <div class="bg-white rounded-xl border border-gray-200 px-5 py-4">
                 <p class="text-xs font-medium text-gray-500 uppercase tracking-wide">High risk ≥ 70%</p>
@@ -130,6 +155,13 @@
                 </tbody>
             </table>
         </div>
+
+        {{-- Pagination --}}
+        @if ($paginator->hasPages())
+            <div class="mt-4">
+                {{ $paginator->appends(['search' => $search])->links() }}
+            </div>
+        @endif
     @endif
 
 </main>

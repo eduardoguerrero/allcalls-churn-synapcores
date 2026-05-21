@@ -36,9 +36,10 @@ return [
     ],
 
     'synapcores' => [
-        'url'     => env('SYNAPCORES_URL', 'http://127.0.0.1:8080'),
-        'api_key' => env('SYNAPCORES_API_KEY'),
-        'timeout' => (int) env('SYNAPCORES_TIMEOUT', 30),
+        'url'      => env('SYNAPCORES_URL', 'http://127.0.0.1:8080'),
+        'api_key'  => env('SYNAPCORES_API_KEY'),
+        'database' => env('SYNAPCORES_DATABASE'),
+        'timeout'  => (int) env('SYNAPCORES_TIMEOUT', 30),
     ],
 
 ];

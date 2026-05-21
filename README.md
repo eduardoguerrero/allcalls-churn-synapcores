@@ -69,7 +69,7 @@ The suite uses SQLite in-memory (no external dependencies required):
 
 ## Design decisions
 
-- **Custom SDK over a library** — SynapCores doesn't ship a PHP SDK, so `app/Services/SynapCores/` wraps Laravel's built-in HTTP client. `SynapCoresAuth` caches the JWT for 55 minutes (keyed by a hash of the API key for cache isolation) and auto-refreshes on 401; `SynapCoresClient` retries once after a token refresh before throwing. This makes the SDK resilient without being complex.
+- **Custom SDK over a library** — SynapCores doesn't ship a PHP SDK, so `app/Services/SynapCores/` wraps Laravel's built-in HTTP client. `SynapCoresAuth` holds the API key and sends it as `Authorization: Bearer <key>` (the CE gateway requires the `Authorization` header regardless of credential type). On a 401, `SynapCoresClient` calls `refreshToken()` and retries once before throwing `SynapCoresException`, so a JWT-based flow can drop in without changing call sites. The client exposes both a `batch()` SQL method for bulk inserts and an `automlPredict()` REST method for scoring — allowing each operation to use the correct API surface.
 
 - **Singleton registration + Repository pattern** — Both `SynapCoresAuth` and `SynapCoresClient` are singletons in `AppServiceProvider` so the cached JWT is shared across the request lifecycle. Data access is abstracted behind `LoyaltyMemberRepositoryInterface` / `EloquentLoyaltyMemberRepository`, allowing the data source to be swapped without touching controllers.
 
@@ -97,6 +97,7 @@ The suite uses SQLite in-memory (no external dependencies required):
 
 | Corner cut | Why | What I'd do instead |
 |---|---|---|
+| CE SQL SELECT on user tables | SynapCores CE returns `"Operation timeout"` for any `SELECT` on user-created tables (and therefore for `CREATE EXPERIMENT`, `TRAIN`, and `AUTOML.PREDICT` too — they all read from the table internally). `CREATE TABLE` and `INSERT` work. `synapcores:train` attempts the full SynapCores ML workflow, then falls back to a rule-based probability model that mirrors the training signal when SynapCores is unavailable. A licensed instance with the full SQL engine enabled would not have this limitation. |
 | No auth on dashboard/API | Out of scope per spec; adds setup friction | Laravel Breeze + sanctum tokens |
 | Partial test suite | Unit + feature tests cover `synapcores:seed` (23 tests, 932 assertions); SDK and dashboard endpoints are not yet covered | Mock `SynapCoresClient` with Mockery for SDK tests |
 | `IF NOT EXISTS` on `CREATE EXPERIMENT` | Simplifies re-running `synapcores:train` | Detect experiment status via SynapCores API before creating |

@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Repositories;
 
-use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 interface LoyaltyMemberRepositoryInterface
 {
-    public const int AT_RISK_LIMIT = 50;
+    public const int PAGE_SIZE = 10;
 
-    public function getAtRisk(int $limit = self::AT_RISK_LIMIT): Collection;
+    public function getAtRisk(?string $search = null): LengthAwarePaginator;
 }

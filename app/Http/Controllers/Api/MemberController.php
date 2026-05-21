@@ -19,7 +19,7 @@ class MemberController extends Controller
 
     public function atRisk(): AnonymousResourceCollection
     {
-        $members = $this->members->getAtRisk(LoyaltyMemberRepositoryInterface::AT_RISK_LIMIT);
+        $members = $this->members->getAtRisk();
 
         return LoyaltyMemberResource::collection($members);
     }
