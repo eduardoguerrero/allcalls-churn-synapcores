@@ -22,10 +22,6 @@ class SynapCoresAuth
 
     public function getToken(): string
     {
-        if ($this->apiKey !== null && $this->apiKey !== '') {
-            return $this->apiKey;
-        }
-
         if ($this->username && $this->password) {
             if ($this->jwt === null) {
                 $this->jwt = $this->login();
@@ -33,7 +29,11 @@ class SynapCoresAuth
             return $this->jwt;
         }
 
-        throw new \RuntimeException('No SynapCores API key configured');
+        if ($this->apiKey !== null && $this->apiKey !== '') {
+            return $this->apiKey;
+        }
+
+        throw new \RuntimeException('No SynapCores credentials configured');
     }
 
     public function refreshToken(): string

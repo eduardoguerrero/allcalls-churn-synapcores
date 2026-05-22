@@ -21,9 +21,7 @@ class SynapCoresClient
 
     /**
      * Run a SELECT and return result rows as associative arrays.
-     * Supports PostgreSQL-style positional parameters ($1, $2, …).
      *
-     * @param list<mixed> $parameters
      * @return array<int, array<string, mixed>>
      */
     public function query(string $sql, array $parameters = []): array
@@ -105,9 +103,9 @@ class SynapCoresClient
     public function batch(array $statements): array
     {
         Log::debug('SynapCoresClient | batch', ['count' => count($statements)]);
-        $queries = array_map(fn($sql) => ['sql' => $sql], $statements);
+        $queries  = array_map(fn($sql) => ['sql' => $sql], $statements);
         $response = $this->post('/v1/query/execute/batch', [
-            'queries' => $queries,
+            'queries'       => $queries,
             'stop_on_error' => false,
         ]);
 
@@ -141,7 +139,7 @@ class SynapCoresClient
 
     private function send(string $path, array $payload, ?int $timeout = null): Response
     {
-        $token = $this->auth->login();
+        $token = $this->auth->getToken();
 
         try {
             return Http::timeout($timeout ?? $this->timeout)

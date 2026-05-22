@@ -152,7 +152,7 @@ Running SynapCores on **port 8080** produced consistent `"Operation timeout"` er
 
 - **Singleton registration + Repository pattern** — Both `SynapCoresAuth` and `SynapCoresClient` are singletons in `AppServiceProvider` so auth state is shared across the request lifecycle. Data access is abstracted behind `LoyaltyMemberRepositoryInterface` / `EloquentLoyaltyMemberRepository`, allowing the data source to be swapped without touching controllers or commands.
 
-- **API rate limiting + FormRequest** — API routes are protected with `throttle:60,1` (60 req/min). `sendOffer` uses a `SendOfferRequest` FormRequest, keeping validation out of the controller. The API response is shaped by `LoyaltyMemberResource` (JsonResource).
+- **API rate limiting** — API routes are protected with `throttle:api` (60 req/min, keyed by IP) configured in `AppServiceProvider`. The dashboard search input is validated by `DashboardRequest` (FormRequest). The API response is shaped by `LoyaltyMemberResource` (JsonResource).
 
 - **Churn signal design** — The seed data encodes a clear but noisy signal: members with `visits_30d < 2` AND `spend_30d < $20` are labelled churned ~85% of the time; high-activity members churn only ~10%; mid-range ~40%. The ~15% noise prevents a trivially overfit model.
 
