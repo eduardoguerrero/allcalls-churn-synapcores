@@ -14,8 +14,8 @@ final class SynapCoresAuth
 
     public function __construct(
         private readonly string $baseUrl,
-        private readonly string $username,
-        private readonly string $password,
+        private readonly ?string $username,
+        private readonly ?string $password,
     ) {
     }
 
@@ -37,6 +37,10 @@ final class SynapCoresAuth
 
     private function login(): string
     {
+        if (!$this->username || !$this->password) {
+            throw new SynapCoresException('SYNAPCORES_USERNAME and SYNAPCORES_PASSWORD must be set in .env');
+        }
+
         Log::info('SynapCoresAuth JWT| logging in via POST /v1/auth/login');
         $response = Http::post("{$this->baseUrl}/v1/auth/login", [
             'username' => $this->username,
