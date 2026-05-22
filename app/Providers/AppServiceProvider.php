@@ -30,7 +30,6 @@ class AppServiceProvider extends ServiceProvider
             return new SynapCoresClient(
                 auth:     $app->make(SynapCoresAuth::class),
                 baseUrl:  config('services.synapcores.url'),
-                database: config('services.synapcores.database'),
                 timeout:  config('services.synapcores.timeout'),
             );
         });

@@ -18,7 +18,7 @@ class EloquentLoyaltyMemberRepository implements LoyaltyMemberRepositoryInterfac
             $query->where(function ($q) use ($term) {
                 $q->whereRaw('LOWER(tier) LIKE ?', ["%{$term}%"]);
                 if (is_numeric($term)) {
-                    $q->orWhere('id', (int) $term);
+                    $q->orWhere('id', (int)$term);
                 }
             });
         }

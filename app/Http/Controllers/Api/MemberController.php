@@ -15,7 +15,8 @@ use Illuminate\Support\Facades\Log;
 class MemberController extends Controller
 {
     public function __construct(private readonly LoyaltyMemberRepositoryInterface $members)
-    { }
+    {
+    }
 
     public function atRisk(): AnonymousResourceCollection
     {
@@ -28,8 +29,8 @@ class MemberController extends Controller
     {
         Log::info('Retention offer triggered', [
             'member_id' => $member->id,
-            'tier'      => $member->tier->value,
-            'churn_p'   => $member->churn_probability,
+            'tier' => $member->tier->value,
+            'churn_p' => $member->churn_probability,
         ]);
 
         return response()->json(['status' => 'offer_logged', 'member_id' => $member->id]);

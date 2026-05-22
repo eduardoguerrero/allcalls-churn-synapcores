@@ -12,13 +12,14 @@ use Illuminate\View\View;
 class DashboardController extends Controller
 {
     public function __construct(private readonly DashboardService $dashboard)
-    { }
+    {
+    }
 
     public function index(DashboardRequest $request): View
     {
-        $search  = $request->search();
-        
-        $data    = $this->dashboard->atRiskSummary($search);
+        $search = $request->search();
+
+        $data = $this->dashboard->atRiskSummary($search);
 
         Log::info('Dashboard at-risk members loaded', ['count' => $data['paginator']->total(), 'page'  => $data['paginator']->currentPage()]);
 

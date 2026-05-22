@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Models;
 
 use App\Enums\Tier;
@@ -19,11 +21,11 @@ class LoyaltyMember extends Model
     ];
 
     protected $casts = [
-        'tier'              => Tier::class,
-        'churned'           => 'boolean',
+        'tier' => Tier::class,
+        'churned' => 'boolean',
         'churn_probability' => 'float',
-        'spend_30d'         => 'float',
-        'last_visit_at'     => 'datetime',
+        'spend_30d' => 'float',
+        'last_visit_at' => 'datetime',
     ];
 
     /** Top at-risk Gold/Platinum members, ordered by predicted churn probability */

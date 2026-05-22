@@ -17,7 +17,8 @@ class SynapCoresAuth
         private readonly ?string $username,
         private readonly ?string $password,
         private readonly ?string $apiKey,
-    ) {}
+    ) {
+    }
 
     public function getToken(): string
     {
@@ -32,18 +33,14 @@ class SynapCoresAuth
             return $this->jwt;
         }
 
-        throw new \RuntimeException('No SynapCores credentials configured');
+        throw new \RuntimeException('No SynapCores API key configured');
     }
 
     public function refreshToken(): string
     {
-        if ($this->apiKey !== null && $this->apiKey !== '') {
-            Log::debug('SynapCoresAuth | refresh requested, API key is static');
-            return $this->apiKey;
-        }
-
         if ($this->username && $this->password) {
             $this->jwt = $this->login();
+
             return $this->jwt;
         }
 
@@ -52,22 +49,11 @@ class SynapCoresAuth
 
     public function login(): string
     {
-        /*print_r($this->baseUrl);
-
-        print_r($this->username);
-              print_r($this->password);*/
-
-
-
-        Log::debug('SynapCoresAuth | logging in via POST /v1/auth/login');
-
+        Log::info('SynapCoresAuth JWT| logging in via POST /v1/auth/login');
         $response = Http::post("{$this->baseUrl}/v1/auth/login", [
             'username' => $this->username,
             'password' => $this->password,
         ]);
-
-        /*print_r($response->status());
-        print_r($response->body()); */
 
         if ($response->failed()) {
             throw new SynapCoresException(
@@ -75,15 +61,21 @@ class SynapCoresAuth
                 $response->status(),
             );
         }
+        Log::info('SynapCoresAuth JWT| logging success');
 
         $token = $response->json('access_token');
 
         if (!is_string($token) || $token === '') {
-            throw new SynapCoresException('SynapCores login returned no access_token');
+            Log::error('SynapCoresAuth | empty or invalid JWT access_token', [
+                'token_type' => gettype($token),
+                'token_empty' => $token === '',
+            ]);
+
+            throw new SynapCoresException('SynapCores login returned no JWT access_token');
         }
 
-        Log::debug('SynapCoresAuth | JWT obtained');
-        
+        Log::info('SynapCoresAuth | JWT obtained');
+
         return $token;
     }
 }

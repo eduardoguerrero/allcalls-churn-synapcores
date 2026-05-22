@@ -20,12 +20,12 @@ class SynapCoresSeed extends Command
     {
         $count = (int) $this->option('count');
 
-        if ($count < 1 || $count > 100_000) {
+        if ($count < 1 || $count > 100000) {
             $this->error('--count must be between 1 and 100,000');
             return self::FAILURE;
         }
 
-        $this->info("Seeding {$count} loyalty members…");
+        $this->info("Seeding {$count} loyalty_members table...");
         Log::info('synapcores:seed started', ['count' => $count]);
 
         LoyaltyMember::truncate();

@@ -14,43 +14,48 @@ use Illuminate\Support\Facades\Log;
 class SynapCoresTrain extends Command
 {
     protected $signature   = 'synapcores:train';
-    protected $description = 'Score churn probability via SynapCores AutoML SQL (falls back to AI Embeddings)';
+    protected $description = 'Score churn probability via SynapCores AutoML SQL';
 
     // Budget for CREATE EXPERIMENT + DEPLOY (CE may take several minutes)
     private const AUTOML_TIMEOUT = 300;
 
-    public function __construct(
-        private readonly SynapCoresClient $synapcores,
-    ) {
+    /**
+     * Inject SynapCoresClient to interact with the SynapCores API.
+     * The client is configured in AppServiceProvider and uses credentials from .env.
+     *
+     * @param SynapCoresClient $synapcores
+     */
+    public function __construct(private readonly SynapCoresClient $synapcores)
+    {
         parent::__construct();
     }
 
     public function handle(): int
     {
-        Log::info('synapcores:train started');
+        Log::info('synapcores:train started...');
 
         $total = DB::table('loyalty_members')->count();
-        $this->info("Scoring {$total} members…");
-
+        $this->info("Scoring {$total} members...");
         if ($total === 0) {
             $this->error('No members found. Run php artisan synapcores:seed first.');
             return self::FAILURE;
         }
 
-        // Path 1 — SynapCores AutoML SQL (recipe workflow):
+        // Path 1 — SynapCores (recipe workflow):
         //   CREATE TABLE loyalty_members → INSERT data
-        //   → CREATE EXPERIMENT … WITH (task_type = 'binary_classification', …)
-        //   → DEPLOY MODEL churn_predictor FROM EXPERIMENT churn_v1
-        //   → PREDICT churn_probability USING churn_predictor AS SELECT … FROM loyalty_members
-        $this->info('[AutoML] Attempting SynapCores AutoML SQL workflow…');
+        //      CREATE EXPERIMENT … WITH (task_type = 'binary_classification', …)
+        //      DEPLOY MODEL churn_predictor FROM EXPERIMENT churn_v1
+        //      PREDICT churn_probability USING churn_predictor AS SELECT … FROM loyalty_members
+        $this->info('Attempting SynapCores workflow...');
         $scores = $this->tryAutoMLPath($total);
+        $this->line(json_encode($scores, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 
         // Path 2 — Cosine similarity over SynapCores AI Embeddings (no table required)
-        if ($scores === null) {
+        /*if ($scores === null) {
             $this->warn('[Embeddings] AutoML unavailable — falling back to AI Embeddings…');
             Log::warning('synapcores:train | AutoML path failed, switching to embeddings fallback');
             $scores = $this->tryEmbeddingsPath($total);
-        }
+        }*/
 
         if ($scores === null || empty($scores)) {
             $this->error('Both scoring paths failed. Check SynapCores connectivity.');
@@ -59,30 +64,32 @@ class SynapCoresTrain extends Command
         }
 
         $this->saveScores($scores);
+
         return self::SUCCESS;
     }
-
-    // ─── AutoML SQL path  (recipe: synapcores.com/developers) ────────────────
 
     /**
      * @return array<int, float>|null
      */
     private function tryAutoMLPath(int $total): ?array
     {
-        // ── Step 1: sync training data into SynapCores ───────────────────────
-        $this->info('  [1/4] Syncing loyalty_members to SynapCores…');
-
+        // Sync training data into SynapCores database
+        $this->info('[1/3] SYNCING LOYALTY_MEMBERS TO SYNAPCORES DATABASE...');
         if (!$this->syncToSynapCores($total)) {
             return null;
         }
 
-        // ── Step 2: CREATE EXPERIMENT ────────────────────────────────────────
-        // Recipe syntax: CREATE EXPERIMENT name AS SELECT … WITH (task_type = …)
-        // Target column is aliased to 'target' inside the SELECT.
-        $this->info('  [2/4] CREATE EXPERIMENT churn_v1…');
+        // Create experiment and returns best_model_id in the response.
+        $this->info('[2/3] CREATE EXPERIMENT churn_v1...');
+        $modelId = null;
         try {
-            $responseExperiment = $this->synapcores->executeAutoML(<<<SQL
-                CREATE EXPERIMENT IF NOT EXISTS churn_v1 AS
+            // Drop any previous run so re-runs don't collide
+            try {
+                $this->synapcores->execute('DROP EXPERIMENT IF EXISTS churn_v1');
+            } catch (\Throwable) {}
+
+            $response = $this->synapcores->executeAutoML(<<<SQL
+                CREATE EXPERIMENT churn_v1 AS
                 SELECT
                     tier,
                     tenure_months,
@@ -91,84 +98,54 @@ class SynapCoresTrain extends Command
                     churned AS target
                 FROM loyalty_members
                 WITH (
-                    task_type            = 'binary_classification',
-                    target_column        = 'target',
-                    optimization_metric  = 'auc',
-                    max_trials           = 10,
-                    time_budget_seconds  = 120
+                    task_type           = 'binary_classification',
+                    target_column       = 'target',
+                    optimization_metric = 'auc',
+                    max_trials          = 10,
+                    time_budget_seconds = 120
                 )
             SQL, self::AUTOML_TIMEOUT);
 
-            print_r($responseExperiment); // DEBUG
-            $this->line('Experiment created.');
-
+            $raw = $response['data']['rows'][0][0] ?? null;
+            if (is_string($raw)) {
+                $result  = json_decode($raw, true);
+                $modelId = $result['best_model_id'] ?? null;
+            }
+            $this->line("Experiment created (model: {$modelId}).");
         } catch (\Throwable $e) {
-            $this->warn("        Failed: {$e->getMessage()}");
+            $this->warn("  Failed: {$e->getMessage()}");
             Log::warning('synapcores:train | CREATE EXPERIMENT failed', ['error' => $e->getMessage()]);
             return null;
         }
 
-        // ── Step 3: DEPLOY MODEL ─────────────────────────────────────────────
-        $this->info('  [3/4] DEPLOY MODEL churn_predictor…');
-        try {
-            $this->synapcores->executeAutoML(
-                'DEPLOY MODEL churn_predictor FROM EXPERIMENT churn_v1',
-                self::AUTOML_TIMEOUT,
-            );
-            $this->line('        Model deployed.');
-        } catch (\Throwable $e) {
-            $this->warn("        Failed: {$e->getMessage()}");
-            Log::warning('synapcores:train | DEPLOY MODEL failed', ['error' => $e->getMessage()]);
-            return null;
-        }
-
-        // ── Step 4: PREDICT ──────────────────────────────────────────────────
-        $this->info('  [4/4] PREDICT churn_probability…');
-
-        return $this->predictViaSQL($total);
+        // PREDICT via SQL (PREDICT … USING <experiment>)
+        $this->info('  [3/3] PREDICT churn_probability USING churn_v1…');
+        return $this->predictViaSQL();
     }
 
     /**
-     * Run the PREDICT SQL, store results in a temp table, read them back.
+     * Run PREDICT directly against the experiment name.
+     * Returns all input columns + churn_probability in one response.
      *
      * @return array<int, float>|null
      */
-    private function predictViaSQL(int $total): ?array
+    private function predictViaSQL(): ?array
     {
-        // Store predictions in a dedicated table so we can SELECT them back
         try {
-            $this->synapcores->execute('DROP TABLE IF EXISTS churn_predictions');
-        } catch (SynapCoresException $e) {
-            Log::warning('synapcores:train | DROP churn_predictions warning', ['error' => $e->getMessage()]);
-        }
-
-        try {
-            $this->synapcores->executeAutoML(<<<SQL
-                CREATE TABLE churn_predictions AS
-                PREDICT churn_probability USING churn_predictor AS
-                SELECT id, tier, tenure_months, visits_30d, spend_30d
-                FROM loyalty_members
-            SQL, self::AUTOML_TIMEOUT);
+            $rows = $this->synapcores->query(
+                'PREDICT churn_probability USING churn_v1 AS SELECT id, tier, tenure_months, visits_30d, spend_30d FROM loyalty_members'
+            );
         } catch (\Throwable $e) {
-            $this->warn("  PREDICT failed: {$e->getMessage()}");
+            $this->warn("PREDICT failed: {$e->getMessage()}");
             Log::warning('synapcores:train | PREDICT failed', ['error' => $e->getMessage()]);
             return null;
         }
 
-        // Read predictions back (id → churn_probability)
-        try {
-            $rows = $this->synapcores->query(
-                'SELECT id, churn_probability FROM churn_predictions ORDER BY id'
-            );
-        } catch (\Throwable $e) {
-            $this->warn("  Reading predictions failed: {$e->getMessage()}");
-            Log::warning('synapcores:train | read churn_predictions failed', ['error' => $e->getMessage()]);
-            return null;
-        }
+        Log::info('Raw PREDICT churn_probability USING... response:', $rows);
 
         $scores = [];
         foreach ($rows as $row) {
-            $id    = (int)   ($row['id']                ?? 0);
+            $id    = (int)   ($row['id'] ?? 0);
             $score = (float) ($row['churn_probability'] ?? 0.5);
             if ($id > 0) {
                 $scores[$id] = $score;
@@ -176,31 +153,39 @@ class SynapCoresTrain extends Command
         }
 
         if (empty($scores)) {
-            $this->warn('  No predictions returned.');
+            $this->warn('No predictions returned.');
             return null;
         }
 
-        $this->line("  AutoML: " . count($scores) . " predictions.");
-        Log::info('synapcores:train | AutoML scoring done', ['scored' => count($scores)]);
+        $this->line('Total predictions from Synapcores: ' . count($scores));
 
         return $scores;
     }
 
     /**
-     * Sync local SQLite loyalty_members → SynapCores.
-     * Returns true if at least one row was confirmed written.
+     * Create loyalty_members table in SynapCores and insert all rows from local SQLite.
+     *
+     * @param int $total
+     * @return bool
      */
     private function syncToSynapCores(int $total): bool
     {
         try {
-            $this->synapcores->execute('DROP TABLE IF EXISTS loyalty_members');
-            $responseCreateTable = $this->synapcores->execute(
+            $responseDrop = $this->synapcores->execute('DROP TABLE IF EXISTS loyalty_members');
+            Log::info('SynapCores DROP TABLE | SynapCores response', ['response' => $responseDrop]);
+            $this->info('SynapCores DROP TABLE | SynapCores response:');
+            $this->line(json_encode($responseDrop, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+            $responseCreate = $this->synapcores->execute(
                 'CREATE TABLE loyalty_members (id INTEGER PRIMARY KEY, tier TEXT, tenure_months INTEGER, visits_30d INTEGER, spend_30d REAL, churned BOOLEAN)'
             );
-            $this->info(json_encode($responseCreateTable, JSON_PRETTY_PRINT));
+            Log::info('SynapCores CREATE TABLE response', ['response' => $responseCreate]);
+            $this->info('SynapCores CREATE TABLE | SynapCores response:');
+            $this->line(json_encode($responseCreate, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
         } catch (SynapCoresException $e) {
-            $this->warn("  CREATE TABLE: {$e->getMessage()} — continuing.");
-            Log::warning('synapcores:train | CREATE TABLE error', ['error' => $e->getMessage()]);
+            $this->warn("Create table in SynapCores error:: {$e->getMessage()}");
+            Log::warning('Create table in SynapCores', ['error' => $e->getMessage()]);
         }
 
         $bar = $this->output->createProgressBar($total);
@@ -239,18 +224,24 @@ class SynapCoresTrain extends Command
 
         $bar->finish();
         $this->newLine();
-        $this->line("  Sync: {$inserted} rows written, {$failed} failed.");
+        $this->line("Sync: {$inserted} rows written, {$failed} failed.");
         Log::info('synapcores:train | sync done', compact('inserted', 'failed'));
 
         if ($inserted === 0) {
-            $this->warn('  No rows reached SynapCores — AutoML path aborted.');
+            $this->warn('No rows reached SynapCores.');
             return false;
+        }
+
+        try {
+            $rows = $this->synapcores->query('SELECT COUNT(id) AS total FROM loyalty_members');
+            $inCloud = (int) ($rows[0]['total'] ?? 0);
+            $this->info("SynapCores confirms {$inCloud} rows in loyalty_members.");
+        } catch (\Throwable $e) {
+            $this->warn("Could not verify row count in SynapCores: {$e->getMessage()}");
         }
 
         return true;
     }
-
-    // ─── Embeddings fallback ──────────────────────────────────────────────────
 
     /**
      * Cosine similarity over SynapCores AI Embeddings.
@@ -258,7 +249,7 @@ class SynapCoresTrain extends Command
      *
      * @return array<int, float>|null
      */
-    private function tryEmbeddingsPath(int $total): ?array
+    /*private function tryEmbeddingsPath(int $total): ?array
     {
         $this->info('[1/2] Loading prototype embeddings from SynapCores…');
 
@@ -316,10 +307,9 @@ class SynapCoresTrain extends Command
         Log::info('synapcores:train | embeddings path done', ['scored' => count($scores), 'failed' => $failed]);
 
         return $scores;
-    }
+    }*/
 
-    /** @return array{0: float[], 1: float[]} */
-    private function getPrototypeEmbeddings(): array
+    /*private function getPrototypeEmbeddings(): array
     {
         $embs = $this->synapcores->batchEmbeddings([
             'Customer who churned: inactive, stopped visiting, no spending, cancelled membership, at high risk of leaving',
@@ -331,38 +321,36 @@ class SynapCoresTrain extends Command
         }
 
         return [$embs[0], $embs[1]];
-    }
+    }*/
 
     /**
-     * @param float[]                       $emb
+     * @param float[] $emb
      * @param array{0: float[], 1: float[]} $prototypes
      */
-    private function churnProbability(array $emb, array $prototypes): float
+    /*private function churnProbability(array $emb, array $prototypes): float
     {
         $simChurned = $this->cosineSim($emb, $prototypes[0]);
-        $simActive  = $this->cosineSim($emb, $prototypes[1]);
-        $total      = $simChurned + $simActive;
+        $simActive = $this->cosineSim($emb, $prototypes[1]);
+        $total = $simChurned + $simActive;
 
         return $total > 0 ? $simChurned / $total : 0.5;
-    }
+    }*/
 
-    /** @param float[] $a  @param float[] $b */
-    private function cosineSim(array $a, array $b): float
+    /** @param float[] $a @param float[] $b */
+    /*private function cosineSim(array $a, array $b): float
     {
         $dot = $na = $nb = 0.0;
         $dims = min(count($a), count($b));
 
         for ($i = 0; $i < $dims; $i++) {
             $dot += $a[$i] * $b[$i];
-            $na  += $a[$i] ** 2;
-            $nb  += $b[$i] ** 2;
+            $na += $a[$i] ** 2;
+            $nb += $b[$i] ** 2;
         }
 
         $denom = sqrt($na) * sqrt($nb);
         return $denom > 0 ? $dot / $denom : 0.0;
-    }
-
-    // ─── Persistence ──────────────────────────────────────────────────────────
+    }*/
 
     /**
      * Normalise raw scores to [0.05, 0.95] and write churn_probability to SQLite.
@@ -371,10 +359,10 @@ class SynapCoresTrain extends Command
      */
     private function saveScores(array $scores): void
     {
-        $this->info('Normalising and saving scores to local database…');
+        $this->info('Normalising and saving scores to local database...');
 
-        $min   = min($scores);
-        $max   = max($scores);
+        $min = min($scores);
+        $max = max($scores);
         $range = $max - $min ?: 1;
 
         $scored = 0;
@@ -389,7 +377,9 @@ class SynapCoresTrain extends Command
         });
 
         $total = DB::table('loyalty_members')->count();
-        $this->info("Done. {$scored}/{$total} members scored — dashboard is ready.");
+
+        $dashboardUrl = config('services.synapcores.dashboard_url', 'http://127.0.0.1:8000');
+        $this->info("Done. {$scored}/{$total} members scored | see the results at {$dashboardUrl}/dashboard");
         Log::info('synapcores:train finished', ['scored' => $scored, 'total' => $total]);
     }
 }

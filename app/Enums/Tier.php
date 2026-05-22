@@ -6,8 +6,8 @@ namespace App\Enums;
 
 enum Tier: string
 {
-    case Bronze   = 'Bronze';
-    case Silver   = 'Silver';
-    case Gold     = 'Gold';
+    case Bronze = 'Bronze';
+    case Silver = 'Silver';
+    case Gold = 'Gold';
     case Platinum = 'Platinum';
 }
