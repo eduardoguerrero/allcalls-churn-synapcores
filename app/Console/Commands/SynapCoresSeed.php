@@ -61,6 +61,7 @@ class SynapCoresSeed extends Command
             }
         }
 
+        // Flush remaining rows that didn't fill a full batch of 500
         if ($rows) {
             LoyaltyMember::insert($rows);
         }
