@@ -114,101 +114,6 @@ class SynapCoresClient
         return $response['results'] ?? $response['data']['results'] ?? $response['data'] ?? [];
     }
 
-    // ─── AutoML REST API  (/v1/automl/*)  ────────────────────────────────────
-
-    /**
-     * Register a dataset for AutoML training.
-     * Returns the dataset ID to pass to trainAutomlModel().
-     *
-     * POST /v1/automl/datasets
-     *
-     * @param array<int, array<string, mixed>> $rows
-     */
-    /*public function createAutomlDataset(string $name, array $rows, string $targetColumn): string
-    {
-        Log::debug('SynapCoresClient | createAutomlDataset', ['name' => $name, 'rows' => count($rows)]);
-        $response = $this->post('/v1/automl/datasets', [
-            'name' => $name,
-            'dataset_type' => 'classification',
-            'source' => $rows,
-            'target_column' => $targetColumn,
-        ]);
-
-        $id = $response['data']['id'] ?? $response['id'] ?? null;
-
-        if ($id === null) {
-            throw new SynapCoresException('createAutomlDataset: no id in response');
-        }
-
-        return (string)$id;
-    }*/
-
-    /**
-     * Start an AutoML training job.
-     * Returns the model ID to pass to automlPredict().
-     *
-     * POST /v1/automl/train
-     */
-    /*public function trainAutomlModel(string $datasetId, ?int $timeout = null): string
-    {
-        Log::debug('SynapCoresClient | trainAutomlModel', ['dataset_id' => $datasetId]);
-        $response = $this->post('/v1/automl/train', [
-            'dataset_id' => $datasetId,
-            'task' => 'classification',
-            'target_column' => 'churned',
-            'time_budget_seconds' => $timeout ?? 120,
-        ], $timeout);
-
-        $id = $response['data']['id']
-            ?? $response['data']['model_id']
-            ?? $response['id']
-            ?? $response['model_id']
-            ?? null;
-
-        if ($id === null) {
-            throw new SynapCoresException('trainAutomlModel: no model id in response');
-        }
-
-        return (string)$id;
-    }*/
-
-    /**
-     * Score rows against a trained AutoML model.
-     *
-     * POST /v1/automl/models/{id}/predict
-     *
-     * @param array<int, array<string, mixed>> $features
-     * @return array<int, float|null>
-     */
-    /*public function automlPredict(string $modelId, array $features): array
-    {
-        Log::debug('SynapCoresClient | automlPredict', ['model' => $modelId, 'rows' => count($features)]);
-        $response = $this->post("/v1/automl/models/{$modelId}/predict", ['inputs' => $features]);
-
-        $predictions = $response['data']['predictions']
-            ?? $response['predictions']
-            ?? [];
-
-        return array_map(fn($p) => is_numeric($p) ? (float)$p : null, $predictions);
-    }*/
-
-    // ─── AI Embeddings  ───────────────────────────────────────────────────────
-
-    /**
-     * Generate embeddings for multiple texts in one round-trip.
-     *
-     * @param string[] $texts
-     * @return array<int, float[]>
-     */
-    public function batchEmbeddings(array $texts): array
-    {
-        Log::debug('SynapCoresClient | batchEmbeddings', ['count' => count($texts)]);
-
-        $response = $this->post('/v1/ai/embeddings/batch', ['texts' => $texts]);
-
-        return $response['data']['embeddings'] ?? $response['embeddings'] ?? [];
-    }
-
     private function post(string $path, array $payload, ?int $timeout = null): array
     {
         $response = $this->send($path, $payload, $timeout);
@@ -243,7 +148,6 @@ class SynapCoresClient
                 ->withToken($token)
                 ->acceptJson()
                 ->post("{$this->baseUrl}{$path}", $payload);
-
         } catch (ConnectionException $e) {
             Log::error('SynapCoresClient | Connection failed', [
                 'base URL' => $this->baseUrl,
