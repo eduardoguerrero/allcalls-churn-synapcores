@@ -17,7 +17,7 @@ class SynapCoresTrain extends Command
     protected $signature   = 'synapcores:train {--debug : Show raw SynapCores API responses}';
     protected $description = 'Score churn probability via SynapCores AutoML SQL';
 
-    private const AUTOML_TIMEOUT = 300;
+    private const AUTOML_TIMEOUT = 600;
 
     public function __construct(
         private readonly SynapCoresClient $synapcores,
@@ -37,18 +37,12 @@ class SynapCoresTrain extends Command
             return self::FAILURE;
         }
 
-        /*SynapCores (recipe workflow):
-            CREATE TABLE loyalty_members -> INSERT data
-              CREATE EXPERIMENT … WITH (task_type = 'binary_classification', …)
-              DEPLOY MODEL churn_predictor FROM EXPERIMENT churn_v1
-              PREDICT churn_probability USING churn_predictor AS SELECT … FROM loyalty_members
-        */
         $this->info('Attempting SynapCores AutoML workflow...');
         $scores = $this->tryAutoMLPath($total);
 
         if ($scores === null || empty($scores)) {
-            $this->error('Both scoring paths failed. Check SynapCores connectivity.');
-            Log::error('synapcores:train | all paths failed');
+            $this->error('AutoML scoring failed. Check SynapCores connectivity and re-run.');
+            Log::error('synapcores:train | scoring failed');
             return self::FAILURE;
         }
 
@@ -96,8 +90,8 @@ class SynapCoresTrain extends Command
                     task_type           = 'binary_classification',
                     target_column       = 'target',
                     optimization_metric = 'auc',
-                    max_trials          = 10,
-                    time_budget_seconds = 120
+                    max_trials          = 5,
+                    time_budget_seconds = 60
                 )
             SQL, self::AUTOML_TIMEOUT);
 
@@ -142,8 +136,6 @@ class SynapCoresTrain extends Command
             Log::warning('synapcores:train | PREDICT failed', ['error' => $e->getMessage()]);
             return null;
         }
-
-        Log::info('Raw PREDICT churn_probability USING... response:', $rows);
 
         $scores = [];
         foreach ($rows as $row) {
@@ -197,14 +189,15 @@ class SynapCoresTrain extends Command
         }
 
         $bar = $this->output->createProgressBar($total);
-        $inserted = 0;
-        $failed   = 0;
+        $inserted  = 0;
+        $failed    = 0;
+        $authError = null;
 
         $bar->start();
 
         LoyaltyMember::select(['id', 'tier', 'tenure_months', 'visits_30d', 'spend_30d', 'churned'])
             ->orderBy('id')
-            ->chunk(100, function ($members) use ($bar, &$inserted, &$failed) {
+            ->chunk(100, function ($members) use ($bar, &$inserted, &$failed, &$authError) {
                 $statements = $members->map(function ($m) {
                     $tier     = str_replace("'", "''", $m->tier->value);
                     $spend    = number_format((float) $m->spend_30d, 2, '.', '');
@@ -213,7 +206,12 @@ class SynapCoresTrain extends Command
                         . " VALUES ({$m->id}, '{$tier}', {$m->tenure_months}, {$m->visits_30d}, {$spend}, {$churned})";
                 })->all();
 
-                $results = $this->synapcores->batch($statements);
+                try {
+                    $results = $this->synapcores->batch($statements);
+                } catch (SynapCoresException $e) {
+                    $authError = $e->getMessage();
+                    return false; // stops chunking
+                }
 
                 foreach ($results as $i => $result) {
                     if (($result['rows_affected'] ?? 0) === 1) {
@@ -233,6 +231,14 @@ class SynapCoresTrain extends Command
 
         $bar->finish();
         $this->newLine();
+
+        if ($authError !== null) {
+            $this->error("SynapCores sync failed: {$authError}");
+            $this->error('Check SYNAPCORES_USERNAME and SYNAPCORES_PASSWORD in .env');
+            Log::error('synapcores:train | sync aborted', ['error' => $authError]);
+            return false;
+        }
+
         $this->line("Sync: {$inserted} rows written, {$failed} failed.");
         Log::info('synapcores:train | sync done', compact('inserted', 'failed'));
 

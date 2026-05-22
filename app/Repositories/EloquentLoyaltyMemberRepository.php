@@ -8,7 +8,7 @@ use App\Models\LoyaltyMember;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
-class EloquentLoyaltyMemberRepository implements LoyaltyMemberRepositoryInterface
+final class EloquentLoyaltyMemberRepository implements LoyaltyMemberRepositoryInterface
 {
     public function getAtRisk(?string $search = null): LengthAwarePaginator
     {
@@ -31,35 +31,42 @@ class EloquentLoyaltyMemberRepository implements LoyaltyMemberRepositoryInterfac
     {
         $min      = min($scores);
         $range    = max($scores) - $min ?: 1;
-        $saved    = 0;
         $scoredAt = now();
 
-        DB::transaction(function () use ($scores, $min, $range, &$saved, $scoredAt) {
-            $predictions = [];
+        $updates     = [];
+        $predictions = [];
 
-            foreach ($scores as $id => $raw) {
-                $prob    = round(0.05 + (($raw - $min) / $range) * 0.90, 4);
+        foreach ($scores as $id => $raw) {
+            $prob = round(0.05 + (($raw - $min) / $range) * 0.90, 4);
 
-                DB::table('loyalty_members')
-                    ->where('id', $id)
-                    ->update(['churn_probability' => $prob]);
+            $updates[] = ['id' => $id, 'churn_probability' => $prob];
 
-                $predictions[] = [
-                    'member_id'         => $id,
-                    'churn_probability' => $prob,
-                    'scored_at'         => $scoredAt,
-                    'created_at'        => $scoredAt,
-                    'updated_at'        => $scoredAt,
-                ];
-                $saved++;
+            $predictions[] = [
+                'member_id'         => $id,
+                'churn_probability' => $prob,
+                'scored_at'         => $scoredAt,
+                'created_at'        => $scoredAt,
+                'updated_at'        => $scoredAt,
+            ];
+        }
+
+        DB::transaction(function () use ($updates, $predictions) {
+            // SQLite rejects upsert() when NOT NULL columns are absent from the INSERT columns list,
+            // even when the ON CONFLICT DO UPDATE path would be taken. Use CASE WHEN bulk UPDATE instead.
+            foreach (array_chunk($updates, 500) as $chunk) {
+                $ids   = implode(',', array_column($chunk, 'id'));
+                $cases = implode(' ', array_map(
+                    fn($row) => "WHEN {$row['id']} THEN {$row['churn_probability']}",
+                    $chunk,
+                ));
+                DB::statement("UPDATE loyalty_members SET churn_probability = CASE id {$cases} END WHERE id IN ({$ids})");
             }
 
-            // Insert in chunks to avoid query size limits on large datasets
             foreach (array_chunk($predictions, 500) as $chunk) {
                 DB::table('churn_predictions')->insert($chunk);
             }
         });
 
-        return $saved;
+        return count($updates);
     }
 }

@@ -7,10 +7,8 @@ namespace App\Services;
 use App\DTOs\AtRiskMemberData;
 use App\Models\LoyaltyMember;
 use App\Repositories\LoyaltyMemberRepositoryInterface;
-use Illuminate\Contracts\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Collection;
 
-class DashboardService
+final class DashboardService
 {
     public function __construct(private readonly LoyaltyMemberRepositoryInterface $members)
     {

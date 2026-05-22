@@ -10,7 +10,7 @@ use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class SynapCoresClient
+final class SynapCoresClient
 {
     public function __construct(
         private readonly SynapCoresAuth $auth,

@@ -1,6 +1,6 @@
 # allcalls-churn-synapcores
 
-A Laravel 13 application that integrates with **SynapCores AIDB** to predict loyalty-member churn. It seeds 8,000 synthetic loyalty-program members with a realistic churn signal, trains a binary-classification model via SynapCores AutoML SQL extensions, and surfaces the top-50 at-risk Gold/Platinum members on an admin dashboard with one-click retention-offer logging.
+A Laravel 13 application that integrates with **SynapCores AIDB** to predict loyalty-member churn. It seeds 8,000 synthetic loyalty-program members with a realistic churn signal, trains a binary-classification model via SynapCores AutoML SQL extensions, and surfaces at-risk Gold/Platinum members on an admin dashboard with one-click retention-offer logging.
 
 ---
 
@@ -26,11 +26,13 @@ php artisan key:generate
 
 # Edit .env and set:
 #   SYNAPCORES_URL=http://127.0.0.1:8085
-#   SYNAPCORES_API_KEY=<key from SynapCores Settings → API Keys>
+#   SYNAPCORES_TIMEOUT=60
+#
+#   Auth — JWT required:
+#      SYNAPCORES_USERNAME=admin
+#      SYNAPCORES_PASSWORD=your-password
 
 # 3. Start SynapCores (in a separate terminal)
-#    Use port 8085 — port 8080 conflicts with another process and causes
-#    SELECT/CREATE EXPERIMENT timeouts even when INSERTs succeed.
 synapcores --port 8085
 
 # 4. Migrate & seed (local SQLite only — no SynapCores connection required)
@@ -54,24 +56,9 @@ php artisan synapcores:train --debug
 The JSON API is available without authentication:
 
 ```
-GET  /api/members/at-risk        → top-50 at-risk members as JSON
+GET  /api/members/at-risk        → at-risk members as JSON
 POST /api/members/{id}/offer     → log a retention offer for a member
 ```
-
----
-
-## Running tests
-
-```bash
-php artisan test
-```
-
-The suite uses SQLite in-memory (no external dependencies required):
-
-| Suite | File | Tests | What it covers |
-|---|---|---|---|
-| Unit | `tests/Unit/SynapCoresSeedTest.php` | 10 | `computeChurn` probability zones, `weightedRandom` distribution |
-| Feature | `tests/Feature/Commands/SynapCoresSeedCommandTest.php` | 13 | Command validation, DB state, truncation, field ranges |
 
 ---
 
@@ -95,7 +82,7 @@ synapcores:train
 
 Dashboard / API
   └─► SELECT FROM loyalty_members WHERE tier IN ('Gold','Platinum')
-      ORDER BY churn_probability DESC LIMIT 50
+      ORDER BY churn_probability DESC
 
 Scheduled job (php artisan schedule:run)
   └─► synapcores:train runs daily → appends a new row to churn_predictions per member
@@ -134,19 +121,12 @@ AS SELECT id, tier, tenure_months, visits_30d, spend_30d FROM loyalty_members;
 
 Scores are normalised to [0.05, 0.95] before being persisted to SQLite. If any step fails the command exits with a non-zero status — check SynapCores connectivity and re-run.
 
-### Observed SynapCores CE behaviour
-
-Running SynapCores on **port 8080** produced consistent `"Operation timeout"` errors on read operations while writes succeeded. Switching to **port 8085** resolved all timeouts. This appears to be a local port conflict, not a CE limitation.
-
----
 
 ## Design decisions
 
-- **Custom SDK over a library** — SynapCores doesn't ship a PHP SDK, so `app/Services/SynapCores/` wraps Laravel's built-in HTTP client. `SynapCoresAuth.getToken()` prefers JWT (obtained via `POST /v1/auth/login` and cached in memory) when `SYNAPCORES_USERNAME` / `SYNAPCORES_PASSWORD` are configured; the raw API key is used only as a fallback when credentials are absent. On a 401, `SynapCoresClient` attempts `refreshToken()` — if a new JWT was obtained, the request is retried once; otherwise the 401 propagates as `SynapCoresException`. `SynapCoresClient` exposes three SQL methods (`query`, `execute`, `executeAutoML`) and one batch method (`batch`); the AI Embeddings endpoint was removed after the AutoML path proved reliable.
+- **Custom SDK over a library** — SynapCores doesn't ship a PHP SDK, so `app/Services/SynapCores/` wraps Laravel's built-in HTTP client. `SynapCoresAuth` authenticates exclusively via JWT: `getToken()` calls `POST /v1/auth/login` with `SYNAPCORES_USERNAME` / `SYNAPCORES_PASSWORD` and caches the token in memory for the request lifecycle. On a 401, `SynapCoresClient` calls `refreshToken()` to obtain a fresh JWT and retries the request once; if the retry also fails, the error propagates as `SynapCoresException`. `SynapCoresClient` exposes three SQL methods (`query`, `execute`, `executeAutoML`) and one batch method (`batch`).
 
-- **CE quirks discovered during development** — `IF NOT EXISTS` is not a keyword in CE's `CREATE EXPERIMENT` syntax; the parser treats it as part of the experiment name, which breaks subsequent references. The correct approach is to `DROP EXPERIMENT IF EXISTS` before each run. CE trains the model inline during `CREATE EXPERIMENT` (returning `best_model_id` in the response), so a separate `TRAIN` step is not required. Predictions are retrieved via `PREDICT … USING <experiment_name>` as a plain SQL query. CE also does not support parameterised queries (`$1`, `$2`, …) — the planner returns `"Value type not supported: Placeholder"` — so INSERT statements for the sync step are built with explicit type-cast string interpolation (`number_format` for floats, integer casts, Enum string constants).
-
-- **Single-path AutoML scoring** — `synapcores:train` runs the full AutoML SQL workflow: sync data → `CREATE EXPERIMENT` → `PREDICT`. If any step fails the command exits with a clear error message. The AI Embeddings cosine-similarity fallback was removed once the AutoML path proved reliable end-to-end.
+- **Single-path AutoML scoring** — `synapcores:train` runs the full AutoML SQL workflow: sync data → `CREATE EXPERIMENT` → `PREDICT`. If any step fails the command exits with a clear error message.
 
 - **`churn_predictions` history table** — Each run of `synapcores:train` appends a timestamped row per member to `churn_predictions`, preserving score history across runs. `loyalty_members.churn_probability` is also updated so the dashboard always reflects the latest score without a join.
 
@@ -182,14 +162,14 @@ ORDER BY churn_probability DESC
 LIMIT 50
 ```
 
-Results would be stored in a `retention_offer TEXT` column on `loyalty_members` and displayed on the dashboard. Not implemented because CE support for `GENERATE` inside a multi-row `SELECT` could not be confirmed without risking a long debugging cycle that would eat into core feature time.
+Results would be stored in a `retention_offer TEXT` column on `loyalty_members` and displayed on the dashboard.
 
 ---
 
 ## What I'd do with more time
 
-- **`SELECT GENERATE(...)` offers** — implement and store in `loyalty_members.retention_offer`; display on dashboard.
-- **Model versioning** — track experiment IDs and `best_score` across runs in `churn_predictions`; surface AUC trend on dashboard.
+- **Personalised retention offers via `SELECT GENERATE(...)`** — use SynapCores CE's generative SQL extension to draft a 2-sentence retention offer per at-risk member: `SELECT GENERATE('Write a 2-sentence retention offer for a member with tenure X months and recent spend $Y')`. Store the result in a `retention_offer TEXT` column on `loyalty_members` and surface it on the dashboard alongside the churn score.
+- **Dashboard authentication** — `/dashboard` is publicly accessible with no login required. Adding Laravel Breeze would gate it behind an authenticated session and restrict access to admin users via a policy or middleware, preventing any anonymous user from viewing churn scores and member data.
 - **Authentication + IDOR fix** — `POST /api/members/{id}/offer` accepts any `member_id` in the table; without an authenticated session there is no way to verify the caller owns the record. Adding Laravel Breeze + Sanctum tokens would allow the controller to check `$request->user()->id === $member->id` (or an admin-only gate) before logging the offer. Today the only effect is a log entry, but if the endpoint were extended to send emails or issue discounts the IDOR would be directly exploitable.
 - **SDK test coverage** — mock `SynapCoresClient` with Mockery to cover auth retry, AutoML error parsing, and batch insert paths.
 - **Docker** — add `docker-compose.yml` with MySQL so evaluators don't need local PHP.
@@ -200,11 +180,9 @@ Results would be stored in a `retention_offer TEXT` column on `loyalty_members` 
 
 | Corner cut | Why | What I'd do instead |
 |---|---|---|
-| Port 8085 in docs | Port 8080 caused read timeouts in the local environment | Detect conflict automatically; expose port as a required env var |
+| SynapCores via Docker image | The official installer targets Ubuntu; it failed on my Debian environment. Used the Docker image as a workaround | Use the native installer on a supported Ubuntu host or publish an official Debian package |
 | No auth on dashboard/API | Out of scope per spec; adds setup friction | Laravel Breeze + Sanctum tokens |
 | IDOR on `POST /api/members/{id}/offer` | No auth layer to tie a session to a member | Require authenticated session; gate on `$request->user()->id === $member->id` or an admin policy |
-| Partial test suite | Unit + feature tests cover `synapcores:seed` (23 tests, 932 assertions); SDK and dashboard endpoints not covered | Mock `SynapCoresClient` with Mockery for SDK tests |
-| `DROP EXPERIMENT` before each run | CE doesn't support `IF NOT EXISTS` on `CREATE EXPERIMENT` | Detect experiment status via SynapCores API before deciding to create or reuse |
 | Tailwind CDN | Removes the `npm install` step entirely | Vite + Tailwind CLI for production |
 | SQLite in local `.env` | Simplest possible setup for evaluators | MySQL with `docker-compose.yml` |
 

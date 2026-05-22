@@ -22,7 +22,6 @@ class AppServiceProvider extends ServiceProvider
                 baseUrl:  config('services.synapcores.url'),
                 username: config('services.synapcores.username'),
                 password: config('services.synapcores.password'),
-                apiKey:   config('services.synapcores.api_key'),
             );
         });
 

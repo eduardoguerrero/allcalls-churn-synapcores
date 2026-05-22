@@ -8,45 +8,34 @@ use App\Services\SynapCores\Exceptions\SynapCoresException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
-class SynapCoresAuth
+final class SynapCoresAuth
 {
     private ?string $jwt = null;
 
     public function __construct(
         private readonly string $baseUrl,
-        private readonly ?string $username,
-        private readonly ?string $password,
-        private readonly ?string $apiKey,
+        private readonly string $username,
+        private readonly string $password,
     ) {
     }
 
     public function getToken(): string
     {
-        if ($this->username && $this->password) {
-            if ($this->jwt === null) {
-                $this->jwt = $this->login();
-            }
-            return $this->jwt;
+        if ($this->jwt === null) {
+            $this->jwt = $this->login();
         }
 
-        if ($this->apiKey !== null && $this->apiKey !== '') {
-            return $this->apiKey;
-        }
-
-        throw new \RuntimeException('No SynapCores credentials configured');
+        return $this->jwt;
     }
 
     public function refreshToken(): bool
     {
-        if ($this->username && $this->password) {
-            $this->jwt = $this->login();
-            return true;
-        }
+        $this->jwt = $this->login();
 
-        return false;
+        return true;
     }
 
-    public function login(): string
+    private function login(): string
     {
         Log::info('SynapCoresAuth JWT| logging in via POST /v1/auth/login');
         $response = Http::post("{$this->baseUrl}/v1/auth/login", [
@@ -55,8 +44,9 @@ class SynapCoresAuth
         ]);
 
         if ($response->failed()) {
+            $reason = $response->json('error.message') ?? $response->json('message') ?? $response->body();
             throw new SynapCoresException(
-                'SynapCores login failed: ' . ($response->json('message') ?? $response->body()),
+                "SynapCores authentication failed: {$reason}",
                 $response->status(),
             );
         }
