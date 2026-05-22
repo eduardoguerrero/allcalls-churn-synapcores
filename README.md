@@ -7,7 +7,7 @@ A Laravel 13 application that integrates with **SynapCores AIDB** to predict loy
 ## Requirements
 
 - PHP ≥ 8.2, Composer
-- SynapCores Community Edition running locally (`synapcores --port 8085`)
+- SynapCores Community Edition running locally
 - SQLite (default)
 
 ---
@@ -25,7 +25,7 @@ cp .env.example .env
 php artisan key:generate
 
 # Edit .env and set:
-#   SYNAPCORES_URL=http://127.0.0.1:8085
+#   SYNAPCORES_URL=http://127.0.0.1:8080
 #   SYNAPCORES_TIMEOUT=60
 #
 #   Auth — JWT required:
@@ -33,7 +33,7 @@ php artisan key:generate
 #      SYNAPCORES_PASSWORD=your-password
 
 # 3. Start SynapCores (in a separate terminal)
-synapcores --port 8085
+synapcores
 
 # 4. Migrate & seed (local SQLite only — no SynapCores connection required)
 php artisan migrate
@@ -73,7 +73,7 @@ synapcores:train
   ├─► 1. Sync: DROP TABLE / CREATE TABLE / batch INSERT → SynapCores
   ├─► 2. DROP EXPERIMENT IF EXISTS churn_v1
   ├─► 3. CREATE EXPERIMENT churn_v1 AS SELECT … WITH (task_type='binary_classification')
-  │       CE trains inline and returns best_model_id in the response.
+  │       SynapCores CE trains inline and returns best_model_id in the response.
   ├─► 4. PREDICT churn_probability USING churn_v1 AS SELECT id, … FROM loyalty_members
   │
   └─► Normalise scores → [0.05, 0.95]
@@ -102,21 +102,25 @@ INSERT INTO loyalty_members ...   -- batched via /v1/query/execute/batch
 -- Step 2: drop previous experiment for idempotency
 DROP EXPERIMENT IF EXISTS churn_v1;
 
--- Step 3: create experiment (CE trains inline, returns best_model_id)
+-- Step 3: create experiment — SynapCores CE times out scanning 8000 rows inline, so training
+-- is limited to the first 4000 (covers all churn-signal zones). PREDICT scores all 8000.
 CREATE EXPERIMENT churn_v1 AS
 SELECT tier, tenure_months, visits_30d, spend_30d, churned AS target
 FROM loyalty_members
+WHERE id <= 4000
 WITH (
     task_type           = 'binary_classification',
     target_column       = 'target',
     optimization_metric = 'auc',
-    max_trials          = 10,
-    time_budget_seconds = 120
+    max_trials          = 5,
+    time_budget_seconds = 60
 );
 
--- Step 4: score all members (CE returns input columns + churn_probability)
+-- Step 4: score all 8000 members in batches of 1000 — SynapCores CE caps PREDICT results at
+-- 1000 rows per response, so the command paginates with WHERE id >= N AND id <= M.
 PREDICT churn_probability USING churn_v1
-AS SELECT id, tier, tenure_months, visits_30d, spend_30d FROM loyalty_members;
+AS SELECT id, tier, tenure_months, visits_30d, spend_30d FROM loyalty_members
+WHERE id >= 1 AND id <= 1000;  -- repeated for each 1000-row window
 ```
 
 Scores are normalised to [0.05, 0.95] before being persisted to SQLite. If any step fails the command exits with a non-zero status — check SynapCores connectivity and re-run.
@@ -168,7 +172,7 @@ Results would be stored in a `retention_offer TEXT` column on `loyalty_members` 
 
 ## What I'd do with more time
 
-- **Personalised retention offers via `SELECT GENERATE(...)`** — use SynapCores CE's generative SQL extension to draft a 2-sentence retention offer per at-risk member: `SELECT GENERATE('Write a 2-sentence retention offer for a member with tenure X months and recent spend $Y')`. Store the result in a `retention_offer TEXT` column on `loyalty_members` and surface it on the dashboard alongside the churn score.
+- **Personalised retention offers via `SELECT GENERATE(...)`** — use SynapCores SynapCores CE's generative SQL extension to draft a 2-sentence retention offer per at-risk member: `SELECT GENERATE('Write a 2-sentence retention offer for a member with tenure X months and recent spend $Y')`. Store the result in a `retention_offer TEXT` column on `loyalty_members` and surface it on the dashboard alongside the churn score.
 - **Dashboard authentication** — `/dashboard` is publicly accessible with no login required. Adding Laravel Breeze would gate it behind an authenticated session and restrict access to admin users via a policy or middleware, preventing any anonymous user from viewing churn scores and member data.
 - **Authentication + IDOR fix** — `POST /api/members/{id}/offer` accepts any `member_id` in the table; without an authenticated session there is no way to verify the caller owns the record. Adding Laravel Breeze + Sanctum tokens would allow the controller to check `$request->user()->id === $member->id` (or an admin-only gate) before logging the offer. Today the only effect is a log entry, but if the endpoint were extended to send emails or issue discounts the IDOR would be directly exploitable.
 - **SDK test coverage** — mock `SynapCoresClient` with Mockery to cover auth retry, AutoML error parsing, and batch insert paths.
@@ -181,10 +185,31 @@ Results would be stored in a `retention_offer TEXT` column on `loyalty_members` 
 | Corner cut | Why | What I'd do instead |
 |---|---|---|
 | SynapCores via Docker image | The official installer targets Ubuntu; it failed on my Debian environment. Used the Docker image as a workaround | Use the native installer on a supported Ubuntu host or publish an official Debian package |
+| CREATE EXPERIMENT on 4000 of 8000 rows | SynapCores CE times out scanning all 8000 rows inline before training starts | SynapCores CE trains on 4000 rows (half the dataset, covers all churn-signal zones); PREDICT still scores all 8000 via paginated batches of 1000 |
+| PREDICT paginated in 1000-row batches | SynapCores CE caps PREDICT results at 1000 rows per response | Ideally SynapCores CE would support a server-side cursor or streaming for large predictions |
 | No auth on dashboard/API | Out of scope per spec; adds setup friction | Laravel Breeze + Sanctum tokens |
 | IDOR on `POST /api/members/{id}/offer` | No auth layer to tie a session to a member | Require authenticated session; gate on `$request->user()->id === $member->id` or an admin policy |
 | Tailwind CDN | Removes the `npm install` step entirely | Vite + Tailwind CLI for production |
 | SQLite in local `.env` | Simplest possible setup for evaluators | MySQL with `docker-compose.yml` |
+
+---
+
+## Screenshots
+
+### `php artisan synapcores:seed`
+Generates 8,000 synthetic loyalty members in the local SQLite database. No SynapCores connection required.
+
+![synapcores:seed](docs/screenshots/seed.png)
+
+### `php artisan synapcores:train`
+Syncs members to SynapCores, trains the AutoML binary-classification experiment on 4,000 rows, then scores all 8,000 members via paginated PREDICT batches.
+
+![synapcores:train](docs/screenshots/train.png)
+
+### Dashboard — at-risk members
+Displays Gold/Platinum members ordered by churn probability, with search and one-click retention-offer logging.
+
+![Dashboard](docs/screenshots/dashboard.png)
 
 ---
 

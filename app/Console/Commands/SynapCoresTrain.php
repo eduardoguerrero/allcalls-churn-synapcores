@@ -77,6 +77,8 @@ class SynapCoresTrain extends Command
             } catch (\Throwable) {}
 
             $this->info('Processing CREATE EXPERIMENT on SynapCores...');
+            // Synapcores CE times out loading 8000 rows inline. Train on the first 4000 (half the dataset,
+            // covers all churn-signal zones); PREDICT still scores all 8000 rows in the CE table.
             $response = $this->synapcores->executeAutoML(<<<SQL
                 CREATE EXPERIMENT churn_v1 AS
                 SELECT
@@ -86,6 +88,7 @@ class SynapCoresTrain extends Command
                     spend_30d,
                     churned AS target
                 FROM loyalty_members
+                WHERE id <= 4000
                 WITH (
                     task_type           = 'binary_classification',
                     target_column       = 'target',
@@ -120,30 +123,44 @@ class SynapCoresTrain extends Command
     }
 
     /**
-     * Run PREDICT directly against the experiment name.
-     * Returns all input columns + churn_probability in one response.
+     * Run PREDICT in batches of 1000 IDs — CE caps result rows per response.
+     * Each batch queries a WHERE id range so all 8000 members get scored.
      *
      * @return array<int, float>|null
      */
     private function predictViaSQL(): ?array
     {
-        try {
-            $rows = $this->synapcores->query(
-                'PREDICT churn_probability USING churn_v1 AS SELECT id, tier, tenure_months, visits_30d, spend_30d FROM loyalty_members'
-            );
-        } catch (\Throwable $e) {
-            $this->warn("PREDICT failed: {$e->getMessage()}");
-            Log::warning('synapcores:train | PREDICT failed', ['error' => $e->getMessage()]);
-            return null;
-        }
+        $scores    = [];
+        $batchSize = 1000;
+        $offset    = 0;
 
-        $scores = [];
-        foreach ($rows as $row) {
-            $id    = (int)   ($row['id'] ?? 0);
-            $score = (float) ($row['churn_probability'] ?? 0.5);
-            if ($id > 0) {
-                $scores[$id] = $score;
+        while (true) {
+            $min = $offset + 1;
+            $max = $offset + $batchSize;
+
+            try {
+                $rows = $this->synapcores->query(
+                    "PREDICT churn_probability USING churn_v1 AS SELECT id, tier, tenure_months, visits_30d, spend_30d FROM loyalty_members WHERE id >= {$min} AND id <= {$max}"
+                );
+            } catch (\Throwable $e) {
+                $this->warn("PREDICT failed (batch {$min}-{$max}): {$e->getMessage()}");
+                Log::warning('synapcores:train | PREDICT failed', ['batch' => "{$min}-{$max}", 'error' => $e->getMessage()]);
+                return null;
             }
+
+            foreach ($rows as $row) {
+                $id    = (int)   ($row['id'] ?? 0);
+                $score = (float) ($row['churn_probability'] ?? 0.5);
+                if ($id > 0) {
+                    $scores[$id] = $score;
+                }
+            }
+
+            if (count($rows) < $batchSize) {
+                break;
+            }
+
+            $offset += $batchSize;
         }
 
         if (empty($scores)) {
