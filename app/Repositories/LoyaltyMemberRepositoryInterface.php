@@ -11,4 +11,7 @@ interface LoyaltyMemberRepositoryInterface
     public const int PAGE_SIZE = 10;
 
     public function getAtRisk(?string $search = null): LengthAwarePaginator;
+
+    /** @param array<int, float> $scores */
+    public function saveChurnScores(array $scores): int;
 }

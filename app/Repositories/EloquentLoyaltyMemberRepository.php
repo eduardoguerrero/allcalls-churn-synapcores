@@ -6,6 +6,7 @@ namespace App\Repositories;
 
 use App\Models\LoyaltyMember;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 
 class EloquentLoyaltyMemberRepository implements LoyaltyMemberRepositoryInterface
 {
@@ -24,5 +25,24 @@ class EloquentLoyaltyMemberRepository implements LoyaltyMemberRepositoryInterfac
         }
 
         return $query->paginate(LoyaltyMemberRepositoryInterface::PAGE_SIZE);
+    }
+
+    public function saveChurnScores(array $scores): int
+    {
+        $min   = min($scores);
+        $range = max($scores) - $min ?: 1;
+        $saved = 0;
+
+        DB::transaction(function () use ($scores, $min, $range, &$saved) {
+            foreach ($scores as $id => $raw) {
+                $prob = 0.05 + (($raw - $min) / $range) * 0.90;
+                DB::table('loyalty_members')
+                    ->where('id', $id)
+                    ->update(['churn_probability' => round($prob, 4)]);
+                $saved++;
+            }
+        });
+
+        return $saved;
     }
 }

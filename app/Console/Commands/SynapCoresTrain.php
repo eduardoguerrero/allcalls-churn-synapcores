@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Models\LoyaltyMember;
+use App\Repositories\LoyaltyMemberRepositoryInterface;
 use App\Services\SynapCores\Exceptions\SynapCoresException;
 use App\Services\SynapCores\SynapCoresClient;
 use Illuminate\Console\Command;
@@ -16,17 +17,12 @@ class SynapCoresTrain extends Command
     protected $signature   = 'synapcores:train';
     protected $description = 'Score churn probability via SynapCores AutoML SQL';
 
-    // Budget for CREATE EXPERIMENT + DEPLOY (CE may take several minutes)
     private const AUTOML_TIMEOUT = 300;
 
-    /**
-     * Inject SynapCoresClient to interact with the SynapCores API.
-     * The client is configured in AppServiceProvider and uses credentials from .env.
-     *
-     * @param SynapCoresClient $synapcores
-     */
-    public function __construct(private readonly SynapCoresClient $synapcores)
-    {
+    public function __construct(
+        private readonly SynapCoresClient $synapcores,
+        private readonly LoyaltyMemberRepositoryInterface $members,
+    ) {
         parent::__construct();
     }
 
@@ -41,21 +37,14 @@ class SynapCoresTrain extends Command
             return self::FAILURE;
         }
 
-        // Path 1 — SynapCores (recipe workflow):
-        //   CREATE TABLE loyalty_members → INSERT data
-        //      CREATE EXPERIMENT … WITH (task_type = 'binary_classification', …)
-        //      DEPLOY MODEL churn_predictor FROM EXPERIMENT churn_v1
-        //      PREDICT churn_probability USING churn_predictor AS SELECT … FROM loyalty_members
+        /*SynapCores (recipe workflow):
+            CREATE TABLE loyalty_members -> INSERT data
+              CREATE EXPERIMENT … WITH (task_type = 'binary_classification', …)
+              DEPLOY MODEL churn_predictor FROM EXPERIMENT churn_v1
+              PREDICT churn_probability USING churn_predictor AS SELECT … FROM loyalty_members
+        */
         $this->info('Attempting SynapCores workflow...');
         $scores = $this->tryAutoMLPath($total);
-        $this->line(json_encode($scores, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
-
-        // Path 2 — Cosine similarity over SynapCores AI Embeddings (no table required)
-        /*if ($scores === null) {
-            $this->warn('[Embeddings] AutoML unavailable — falling back to AI Embeddings…');
-            Log::warning('synapcores:train | AutoML path failed, switching to embeddings fallback');
-            $scores = $this->tryEmbeddingsPath($total);
-        }*/
 
         if ($scores === null || empty($scores)) {
             $this->error('Both scoring paths failed. Check SynapCores connectivity.');
@@ -119,7 +108,8 @@ class SynapCoresTrain extends Command
         }
 
         // PREDICT via SQL (PREDICT … USING <experiment>)
-        $this->info('  [3/3] PREDICT churn_probability USING churn_v1…');
+        $this->info('  [3/3] PREDICT churn_probability USING churn_v1...');
+
         return $this->predictViaSQL();
     }
 
@@ -157,7 +147,7 @@ class SynapCoresTrain extends Command
             return null;
         }
 
-        $this->line('Total predictions from Synapcores: ' . count($scores));
+        $this->line('Total predictions retrieved from SynapCores: ' . count($scores));
 
         return $scores;
     }
@@ -243,143 +233,14 @@ class SynapCoresTrain extends Command
         return true;
     }
 
-    /**
-     * Cosine similarity over SynapCores AI Embeddings.
-     * Reads features from local SQLite — no SynapCores table required.
-     *
-     * @return array<int, float>|null
-     */
-    /*private function tryEmbeddingsPath(int $total): ?array
-    {
-        $this->info('[1/2] Loading prototype embeddings from SynapCores…');
-
-        try {
-            $prototypes = $this->getPrototypeEmbeddings();
-        } catch (\Throwable $e) {
-            $this->error("  Embeddings unavailable: {$e->getMessage()}");
-            return null;
-        }
-
-        $this->line('  Prototypes loaded (' . count($prototypes[0]) . '-dim embeddings).');
-        $this->info('[2/2] Scoring members via batch embeddings…');
-
-        $scores = [];
-        $failed = 0;
-        $bar    = $this->output->createProgressBar($total);
-        $bar->start();
-
-        DB::table('loyalty_members')
-            ->select(['id', 'tier', 'tenure_months', 'visits_30d', 'spend_30d'])
-            ->orderBy('id')
-            ->chunk(100, function ($members) use ($prototypes, $bar, &$scores, &$failed) {
-                try {
-                    $texts = $members->map(fn($m) =>
-                        "Loyalty member tier {$m->tier}, {$m->tenure_months} months, "
-                        . "{$m->visits_30d} visits, \${$m->spend_30d} spend last 30 days"
-                    )->values()->all();
-
-                    $embeddings = $this->synapcores->batchEmbeddings($texts);
-
-                    foreach ($members->values() as $i => $m) {
-                        $emb = $embeddings[$i] ?? null;
-                        if ($emb !== null) {
-                            $scores[$m->id] = $this->churnProbability($emb, $prototypes);
-                        } else {
-                            $failed++;
-                        }
-                    }
-                } catch (\Throwable $e) {
-                    Log::warning('synapcores:train | embeddings batch failed', ['error' => $e->getMessage()]);
-                    $failed += count($members);
-                }
-
-                $bar->advance(count($members));
-            });
-
-        $bar->finish();
-        $this->newLine();
-
-        if (empty($scores)) {
-            return null;
-        }
-
-        $this->line('  Embeddings: ' . count($scores) . " scored, {$failed} failed.");
-        Log::info('synapcores:train | embeddings path done', ['scored' => count($scores), 'failed' => $failed]);
-
-        return $scores;
-    }*/
-
-    /*private function getPrototypeEmbeddings(): array
-    {
-        $embs = $this->synapcores->batchEmbeddings([
-            'Customer who churned: inactive, stopped visiting, no spending, cancelled membership, at high risk of leaving',
-            'Loyal active customer: frequent visits, consistent spending, long tenure, highly engaged, low churn risk',
-        ]);
-
-        if (count($embs) < 2) {
-            throw new \RuntimeException('Expected 2 prototype embeddings, got ' . count($embs));
-        }
-
-        return [$embs[0], $embs[1]];
-    }*/
-
-    /**
-     * @param float[] $emb
-     * @param array{0: float[], 1: float[]} $prototypes
-     */
-    /*private function churnProbability(array $emb, array $prototypes): float
-    {
-        $simChurned = $this->cosineSim($emb, $prototypes[0]);
-        $simActive = $this->cosineSim($emb, $prototypes[1]);
-        $total = $simChurned + $simActive;
-
-        return $total > 0 ? $simChurned / $total : 0.5;
-    }*/
-
-    /** @param float[] $a @param float[] $b */
-    /*private function cosineSim(array $a, array $b): float
-    {
-        $dot = $na = $nb = 0.0;
-        $dims = min(count($a), count($b));
-
-        for ($i = 0; $i < $dims; $i++) {
-            $dot += $a[$i] * $b[$i];
-            $na += $a[$i] ** 2;
-            $nb += $b[$i] ** 2;
-        }
-
-        $denom = sqrt($na) * sqrt($nb);
-        return $denom > 0 ? $dot / $denom : 0.0;
-    }*/
-
-    /**
-     * Normalise raw scores to [0.05, 0.95] and write churn_probability to SQLite.
-     *
-     * @param array<int, float> $scores
-     */
     private function saveScores(array $scores): void
     {
         $this->info('Normalising and saving scores to local database...');
 
-        $min = min($scores);
-        $max = max($scores);
-        $range = $max - $min ?: 1;
+        $scored = $this->members->saveChurnScores($scores);
+        $total  = DB::table('loyalty_members')->count();
 
-        $scored = 0;
-        DB::transaction(function () use ($scores, $min, $range, &$scored) {
-            foreach ($scores as $id => $raw) {
-                $prob = 0.05 + (($raw - $min) / $range) * 0.90;
-                DB::table('loyalty_members')
-                    ->where('id', $id)
-                    ->update(['churn_probability' => round($prob, 4)]);
-                $scored++;
-            }
-        });
-
-        $total = DB::table('loyalty_members')->count();
-
-        $dashboardUrl = config('services.synapcores.dashboard_url', 'http://127.0.0.1:8000');
-        $this->info("Done. {$scored}/{$total} members scored | see the results at {$dashboardUrl}/dashboard");
+        $this->info("Done. {$scored}/{$total} members scored");
         Log::info('synapcores:train finished', ['scored' => $scored, 'total' => $total]);
     }
 }

@@ -11,44 +11,44 @@ use Illuminate\Support\Facades\Log;
 
 class SynapCoresSeed extends Command
 {
-    protected $signature   = 'synapcores:seed {--count=8000 : Number of members to generate}';
+    protected $signature = 'synapcores:seed {--count=8000 : Number of members to generate}';
     protected $description = 'Seed loyalty_members in the local database with a realistic churn signal';
 
-    private const array WEIGHTS = [50, 30, 15, 5];
+    private const WEIGHTS = [50, 30, 15, 5];
 
     public function handle(): int
     {
-        $count = (int) $this->option('count');
+        $count = (int)$this->option('count');
 
-        if ($count < 1 || $count > 100000) {
-            $this->error('--count must be between 1 and 100,000');
+        if ($count < 1 || $count > 10000) {
+            $this->error('--count must be between 1 and 10,000');
             return self::FAILURE;
         }
 
-        $this->info("Seeding {$count} loyalty_members table...");
+        $this->info("Seeding {$count} loyalty_members local table...");
         Log::info('synapcores:seed started', ['count' => $count]);
 
         LoyaltyMember::truncate();
 
-        $now     = now();
-        $rows    = [];
+        $now = now();
+        $rows = [];
         $churned = 0;
 
         for ($id = 1; $id <= $count; $id++) {
-            $visits  = random_int(0, 20);
-            $spend   = round(random_int(0, 50000) / 100, 2);
+            $visits = random_int(0, 20);
+            $spend = round(random_int(0, 50000) / 100, 2);
             $isChurn = $this->computeChurn($visits, $spend);
 
             $rows[] = [
-                'tier'              => $this->weightedRandom(Tier::cases(), self::WEIGHTS)->value,
-                'tenure_months'     => random_int(1, 84),
-                'visits_30d'        => $visits,
-                'spend_30d'         => $spend,
-                'last_visit_at'     => $now->copy()->subDays(random_int(0, 90)),
-                'churned'           => $isChurn,
+                'tier' => $this->weightedRandom(Tier::cases(), self::WEIGHTS)->value,
+                'tenure_months' => random_int(1, 84),
+                'visits_30d' => $visits,
+                'spend_30d' => $spend,
+                'last_visit_at' => $now->copy()->subDays(random_int(0, 90)),
+                'churned' => $isChurn,
                 'churn_probability' => null,
-                'created_at'        => $now,
-                'updated_at'        => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
             ];
 
             if ($isChurn) {
@@ -93,11 +93,10 @@ class SynapCoresSeed extends Command
         return $roll <= 40;
     }
 
-    /** @param Tier[] $items  @param int[] $weights */
     private function weightedRandom(array $items, array $weights): Tier
     {
-        $total      = array_sum($weights);
-        $roll       = random_int(1, $total);
+        $total = array_sum($weights);
+        $roll = random_int(1, $total);
         $cumulative = 0;
 
         foreach ($items as $i => $item) {

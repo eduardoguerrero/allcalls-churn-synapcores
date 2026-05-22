@@ -41,7 +41,6 @@ return [
         'password'      => env('SYNAPCORES_PASSWORD'),
         'api_key'       => env('SYNAPCORES_API_KEY'),
         'timeout'       => (int) env('SYNAPCORES_TIMEOUT', 30),
-        'dashboard_url' => env('PREDICTOR_URL_DASHBOARD', 'http://127.0.0.1:8000'),
     ],
 
 ];
