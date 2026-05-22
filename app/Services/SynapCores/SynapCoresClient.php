@@ -20,7 +20,7 @@ class SynapCoresClient
     }
 
     /**
-     * Run a SELECT and return result rows as associative arrays.
+     * Run a SELECT against SynapCores and return rows as associative arrays.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -50,11 +50,9 @@ class SynapCoresClient
     }
 
     /**
-     * Execute a DDL/DML statement.
-     * Supports PostgreSQL-style positional parameters ($1, $2, …).
-     * Pass $timeout (seconds) to override the default for long-running statements.
+     * Execute a DDL/DML statement (CREATE TABLE, INSERT, DROP, etc.) and return the raw CE response array.
      *
-     * @param list<mixed> $parameters
+     * @return array<string, mixed>
      */
     public function execute(string $sql, array $parameters = [], ?int $timeout = null): array
     {
@@ -69,10 +67,14 @@ class SynapCoresClient
     }
 
     /**
-     * Execute a SynapCores AutoML SQL statement (CREATE EXPERIMENT, DEPLOY MODEL, PREDICT).
-     * These return HTTP 200 even on failure, encoding the result in an `automl_result`
-     * column as JSON: {"status":"ok"} or {"status":"error","error":"..."}.
-     * This method parses that envelope and throws SynapCoresException on AutoML errors.
+     * Execute a SynapCores AutoML SQL statement (CREATE EXPERIMENT, PREDICT … USING).
+     * SynapCores CE returns HTTP 200 even on failure, encoding the outcome in the first row as JSON:
+     *   {"status":"ok", "best_model_id": "…"}  — success
+     *   {"status":"error", "error": "…"}        — failure
+     * This method unwraps that envelope and throws SynapCoresException on AutoML errors,
+     * so callers can use a plain try/catch without inspecting the response body.
+     *
+     * @return array<string, mixed>
      */
     public function executeAutoML(string $sql, ?int $timeout = null): array
     {
@@ -95,7 +97,9 @@ class SynapCoresClient
     }
 
     /**
-     * Execute multiple SQL statements in one round-trip.
+     * Execute multiple SQL statements in a single HTTP round-trip via /v1/query/execute/batch.
+     * Runs with stop_on_error=false so all statements are attempted regardless of individual
+     * failures — callers should check each result's 'rows_affected' to detect partial failures.
      *
      * @param string[] $statements
      * @return array<int, array<string, mixed>>
@@ -112,14 +116,22 @@ class SynapCoresClient
         return $response['results'] ?? $response['data']['results'] ?? $response['data'] ?? [];
     }
 
+    /**
+     * Send a POST request to SynapCores CE, handle 401 token refresh with one retry,
+     * and throw SynapCoresException on any non-2xx response.
+     *
+     * @return array<string, mixed>
+     */
     private function post(string $path, array $payload, ?int $timeout = null): array
     {
         $response = $this->send($path, $payload, $timeout);
 
         if ($response->status() === 401) {
-            Log::warning('SynapCoresClient| 401 HTTP_UNAUTHORIZED received, retrying after token refresh');
-            $this->auth->refreshToken();
-            $response = $this->send($path, $payload, $timeout);
+            $refreshed = $this->auth->refreshToken();
+            Log::warning('SynapCoresClient | 401 received', ['token_refreshed' => $refreshed]);
+            if ($refreshed) {
+                $response = $this->send($path, $payload, $timeout);
+            }
         }
 
         if ($response->failed()) {
@@ -137,6 +149,10 @@ class SynapCoresClient
         return $response->json() ?? [];
     }
 
+    /**
+     * Perform the raw HTTP POST to SynapCores CE with the current auth token.
+     * Throws SynapCoresException if the host is unreachable (ConnectionException).
+     */
     private function send(string $path, array $payload, ?int $timeout = null): Response
     {
         $token = $this->auth->getToken();

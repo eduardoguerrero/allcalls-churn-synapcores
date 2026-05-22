@@ -190,7 +190,7 @@ Results would be stored in a `retention_offer TEXT` column on `loyalty_members` 
 
 - **`SELECT GENERATE(...)` offers** — implement and store in `loyalty_members.retention_offer`; display on dashboard.
 - **Model versioning** — track experiment IDs and `best_score` across runs in `churn_predictions`; surface AUC trend on dashboard.
-- **Authentication** — add Laravel Breeze to protect `/dashboard` behind a login screen.
+- **Authentication + IDOR fix** — `POST /api/members/{id}/offer` accepts any `member_id` in the table; without an authenticated session there is no way to verify the caller owns the record. Adding Laravel Breeze + Sanctum tokens would allow the controller to check `$request->user()->id === $member->id` (or an admin-only gate) before logging the offer. Today the only effect is a log entry, but if the endpoint were extended to send emails or issue discounts the IDOR would be directly exploitable.
 - **SDK test coverage** — mock `SynapCoresClient` with Mockery to cover auth retry, AutoML error parsing, and batch insert paths.
 - **Docker** — add `docker-compose.yml` with MySQL so evaluators don't need local PHP.
 
@@ -202,6 +202,7 @@ Results would be stored in a `retention_offer TEXT` column on `loyalty_members` 
 |---|---|---|
 | Port 8085 in docs | Port 8080 caused read timeouts in the local environment | Detect conflict automatically; expose port as a required env var |
 | No auth on dashboard/API | Out of scope per spec; adds setup friction | Laravel Breeze + Sanctum tokens |
+| IDOR on `POST /api/members/{id}/offer` | No auth layer to tie a session to a member | Require authenticated session; gate on `$request->user()->id === $member->id` or an admin policy |
 | Partial test suite | Unit + feature tests cover `synapcores:seed` (23 tests, 932 assertions); SDK and dashboard endpoints not covered | Mock `SynapCoresClient` with Mockery for SDK tests |
 | `DROP EXPERIMENT` before each run | CE doesn't support `IF NOT EXISTS` on `CREATE EXPERIMENT` | Detect experiment status via SynapCores API before deciding to create or reuse |
 | Tailwind CDN | Removes the `npm install` step entirely | Vite + Tailwind CLI for production |

@@ -207,9 +207,10 @@ class SynapCoresTrain extends Command
             ->chunk(100, function ($members) use ($bar, &$inserted, &$failed) {
                 $statements = $members->map(function ($m) {
                     $tier     = str_replace("'", "''", $m->tier->value);
-                    $churnInt = $m->churned ? 1 : 0;
+                    $spend    = number_format((float) $m->spend_30d, 2, '.', '');
+                    $churned  = $m->churned ? 1 : 0;
                     return "INSERT INTO loyalty_members (id, tier, tenure_months, visits_30d, spend_30d, churned)"
-                        . " VALUES ({$m->id}, '{$tier}', {$m->tenure_months}, {$m->visits_30d}, {$m->spend_30d}, {$churnInt})";
+                        . " VALUES ({$m->id}, '{$tier}', {$m->tenure_months}, {$m->visits_30d}, {$spend}, {$churned})";
                 })->all();
 
                 $results = $this->synapcores->batch($statements);

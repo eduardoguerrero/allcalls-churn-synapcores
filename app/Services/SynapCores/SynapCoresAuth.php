@@ -36,15 +36,14 @@ class SynapCoresAuth
         throw new \RuntimeException('No SynapCores credentials configured');
     }
 
-    public function refreshToken(): string
+    public function refreshToken(): bool
     {
         if ($this->username && $this->password) {
             $this->jwt = $this->login();
-
-            return $this->jwt;
+            return true;
         }
 
-        return '';
+        return false;
     }
 
     public function login(): string
