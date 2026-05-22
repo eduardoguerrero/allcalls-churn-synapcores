@@ -29,17 +29,34 @@ class EloquentLoyaltyMemberRepository implements LoyaltyMemberRepositoryInterfac
 
     public function saveChurnScores(array $scores): int
     {
-        $min   = min($scores);
-        $range = max($scores) - $min ?: 1;
-        $saved = 0;
+        $min      = min($scores);
+        $range    = max($scores) - $min ?: 1;
+        $saved    = 0;
+        $scoredAt = now();
 
-        DB::transaction(function () use ($scores, $min, $range, &$saved) {
+        DB::transaction(function () use ($scores, $min, $range, &$saved, $scoredAt) {
+            $predictions = [];
+
             foreach ($scores as $id => $raw) {
-                $prob = 0.05 + (($raw - $min) / $range) * 0.90;
+                $prob    = round(0.05 + (($raw - $min) / $range) * 0.90, 4);
+
                 DB::table('loyalty_members')
                     ->where('id', $id)
-                    ->update(['churn_probability' => round($prob, 4)]);
+                    ->update(['churn_probability' => $prob]);
+
+                $predictions[] = [
+                    'member_id'         => $id,
+                    'churn_probability' => $prob,
+                    'scored_at'         => $scoredAt,
+                    'created_at'        => $scoredAt,
+                    'updated_at'        => $scoredAt,
+                ];
                 $saved++;
+            }
+
+            // Insert in chunks to avoid query size limits on large datasets
+            foreach (array_chunk($predictions, 500) as $chunk) {
+                DB::table('churn_predictions')->insert($chunk);
             }
         });
 
