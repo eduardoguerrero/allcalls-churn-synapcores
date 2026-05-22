@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\Log;
 
 class SynapCoresTrain extends Command
 {
-    protected $signature   = 'synapcores:train';
+    protected $signature   = 'synapcores:train {--debug : Show raw SynapCores API responses}';
     protected $description = 'Score churn probability via SynapCores AutoML SQL';
 
     private const AUTOML_TIMEOUT = 300;
@@ -43,7 +43,7 @@ class SynapCoresTrain extends Command
               DEPLOY MODEL churn_predictor FROM EXPERIMENT churn_v1
               PREDICT churn_probability USING churn_predictor AS SELECT … FROM loyalty_members
         */
-        $this->info('Attempting SynapCores workflow...');
+        $this->info('Attempting SynapCores AutoML workflow...');
         $scores = $this->tryAutoMLPath($total);
 
         if ($scores === null || empty($scores)) {
@@ -74,9 +74,15 @@ class SynapCoresTrain extends Command
         try {
             // Drop any previous run so re-runs don't collide
             try {
-                $this->synapcores->execute('DROP EXPERIMENT IF EXISTS churn_v1');
+                $this->info('Processing DROP EXPERIMENT on SynapCores...');
+                $responseDropExperiment = $this->synapcores->execute('DROP EXPERIMENT IF EXISTS churn_v1');
+                if ($this->option('debug')) {
+                    $this->info('SynapCores DROP EXPERIMENT response:');
+                    $this->line(json_encode($responseDropExperiment, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+                }
             } catch (\Throwable) {}
 
+            $this->info('Processing CREATE EXPERIMENT on SynapCores...');
             $response = $this->synapcores->executeAutoML(<<<SQL
                 CREATE EXPERIMENT churn_v1 AS
                 SELECT
@@ -100,6 +106,12 @@ class SynapCoresTrain extends Command
                 $result  = json_decode($raw, true);
                 $modelId = $result['best_model_id'] ?? null;
             }
+
+            if ($this->option('debug')) {
+                $this->info('SynapCores CREATE EXPERIMENT response:');
+                $this->line(json_encode($response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            }
+
             $this->line("Experiment created (model: {$modelId}).");
         } catch (\Throwable $e) {
             $this->warn("  Failed: {$e->getMessage()}");
@@ -161,17 +173,23 @@ class SynapCoresTrain extends Command
     private function syncToSynapCores(int $total): bool
     {
         try {
+            $this->info('Processing DROP TABLE on SynapCores...');
             $responseDrop = $this->synapcores->execute('DROP TABLE IF EXISTS loyalty_members');
-            Log::info('SynapCores DROP TABLE | SynapCores response', ['response' => $responseDrop]);
-            $this->info('SynapCores DROP TABLE | SynapCores response:');
-            $this->line(json_encode($responseDrop, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            Log::info('SynapCores DROP TABLE response', ['response' => $responseDrop]);
+            if ($this->option('debug')) {
+                $this->info('SynapCores DROP TABLE response:');
+                $this->line(json_encode($responseDrop, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            }
 
+            $this->info('Processing CREATE TABLE on SynapCores...');
             $responseCreate = $this->synapcores->execute(
                 'CREATE TABLE loyalty_members (id INTEGER PRIMARY KEY, tier TEXT, tenure_months INTEGER, visits_30d INTEGER, spend_30d REAL, churned BOOLEAN)'
             );
             Log::info('SynapCores CREATE TABLE response', ['response' => $responseCreate]);
-            $this->info('SynapCores CREATE TABLE | SynapCores response:');
-            $this->line(json_encode($responseCreate, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            if ($this->option('debug')) {
+                $this->info('SynapCores CREATE TABLE response:');
+                $this->line(json_encode($responseCreate, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            }
 
         } catch (SynapCoresException $e) {
             $this->warn("Create table in SynapCores error:: {$e->getMessage()}");
