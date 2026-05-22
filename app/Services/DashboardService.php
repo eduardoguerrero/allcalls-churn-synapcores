@@ -1,0 +1,29 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\DTOs\AtRiskMemberData;
+use App\Models\LoyaltyMember;
+use App\Repositories\LoyaltyMemberRepositoryInterface;
+
+final class DashboardService
+{
+    public function __construct(private readonly LoyaltyMemberRepositoryInterface $members)
+    {
+    }
+
+    public function atRiskSummary(?string $search): array
+    {
+        $paginator = $this->members->getAtRisk($search);
+        $items = collect($paginator->items())->map(fn(LoyaltyMember $member) => AtRiskMemberData::fromModel($member));
+
+        return [
+            'paginator' => $paginator,
+            'members' => $items,
+            'avg' => round((float)$items->avg('churnProbability') * 100, 1),
+            'high' => $items->where('churnProbability', '>=', 0.7)->count(),
+        ];
+    }
+}
