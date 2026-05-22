@@ -6,22 +6,15 @@ namespace App\Console\Commands;
 
 use App\Enums\Tier;
 use App\Models\LoyaltyMember;
-use App\Services\SynapCores\Exceptions\SynapCoresException;
-use App\Services\SynapCores\SynapCoresClient;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 class SynapCoresSeed extends Command
 {
     protected $signature   = 'synapcores:seed {--count=8000 : Number of members to generate}';
-    protected $description = 'Seed loyalty_members locally and sync to SynapCores';
+    protected $description = 'Seed loyalty_members in the local database with a realistic churn signal';
 
     private const array WEIGHTS = [50, 30, 15, 5];
-
-    public function __construct(private readonly SynapCoresClient $synapcores)
-    {
-        parent::__construct();
-    }
 
     public function handle(): int
     {
@@ -35,7 +28,6 @@ class SynapCoresSeed extends Command
         $this->info("Seeding {$count} loyalty members…");
         Log::info('synapcores:seed started', ['count' => $count]);
 
-        // Local SQLite (for dashboard reads) --------------------------------------------
         LoyaltyMember::truncate();
 
         $now     = now();
@@ -73,86 +65,11 @@ class SynapCoresSeed extends Command
             LoyaltyMember::insert($rows);
         }
 
-        $this->info("Local DB: {$count} members inserted ({$churned} churned).");
-        Log::info('synapcores:seed local done', compact('count', 'churned'));
-
-        // SynapCores sync --------------------------------------------
-        $this->syncToSynapCores($count);
+        $this->info("Done. {$count} members inserted ({$churned} churned).");
+        $this->line("Run <info>php artisan synapcores:train</info> to score churn probabilities.");
+        Log::info('synapcores:seed done', compact('count', 'churned'));
 
         return self::SUCCESS;
-    }
-
-    private function syncToSynapCores(int $total): void
-    {
-        $this->info("Syncing {$total} members to SynapCores…");
-
-        try {
-            $this->synapcores->execute('DROP TABLE IF EXISTS loyalty_members');
-        } catch (SynapCoresException $e) {
-            Log::warning('synapcores:seed | DROP TABLE error (ignored)', ['status' => $e->getStatusCode()]);
-        }
-
-        try {
-            $this->synapcores->execute(<<<SQL
-                CREATE TABLE loyalty_members (
-                    id                INTEGER PRIMARY KEY,
-                    tier              TEXT    NOT NULL,
-                    tenure_months     INTEGER NOT NULL,
-                    visits_30d        INTEGER NOT NULL,
-                    spend_30d         REAL    NOT NULL,
-                    churned           INTEGER NOT NULL,
-                    churn_probability REAL
-                )
-            SQL);
-        } catch (SynapCoresException $e) {
-            $this->warn("SynapCores CREATE TABLE: {$e->getMessage()}");
-            Log::warning('synapcores:seed | CREATE TABLE error', ['error' => $e->getMessage()]);
-        }
-
-        $bar              = $this->output->createProgressBar($total);
-        $bar->start();
-
-        $inserted         = 0;
-        $reportedFailures = 0;
-
-        LoyaltyMember::select(['id', 'tier', 'tenure_months', 'visits_30d', 'spend_30d', 'churned'])
-            ->orderBy('id')
-            ->chunk(100, function ($members) use ($bar, &$inserted, &$reportedFailures) {
-                $statements = $members->map(function ($m) {
-                    $tier     = str_replace("'", "''", $m->tier->value);
-                    $churnInt = $m->churned ? 1 : 0;
-                    return "INSERT INTO loyalty_members (id, tier, tenure_months, visits_30d, spend_30d, churned, churn_probability)"
-                        . " VALUES ({$m->id}, '{$tier}', {$m->tenure_months}, {$m->visits_30d}, {$m->spend_30d}, {$churnInt}, NULL)";
-                })->all();
-
-                $results = $this->synapcores->batch($statements);
-                $retries = [];
-
-                foreach ($results as $i => $result) {
-                    if (($result['rows_affected'] ?? 0) === 1) {
-                        $inserted++;
-                    } else {
-                        $retries[] = $statements[$i];
-                    }
-                }
-
-                foreach ($retries as $sql) {
-                    try {
-                        $this->synapcores->execute($sql);
-                        $inserted++;
-                    } catch (\Throwable) {
-                        $reportedFailures++;
-                    }
-                }
-
-                $bar->advance(count($members));
-            });
-
-        $bar->finish();
-        $this->newLine();
-
-        $this->info("SynapCores: {$inserted} rows confirmed, {$reportedFailures} failed.");
-        Log::info('synapcores:seed sync done', compact('inserted', 'reportedFailures'));
     }
 
     /**

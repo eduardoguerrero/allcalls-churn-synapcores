@@ -19,7 +19,10 @@ class AppServiceProvider extends ServiceProvider
 
         $this->app->singleton(SynapCoresAuth::class, function () {
             return new SynapCoresAuth(
-                apiKey: config('services.synapcores.api_key'),
+                baseUrl:  config('services.synapcores.url'),
+                username: config('services.synapcores.username'),
+                password: config('services.synapcores.password'),
+                apiKey:   config('services.synapcores.api_key'),
             );
         });
 
